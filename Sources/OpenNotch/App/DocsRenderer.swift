@@ -90,11 +90,11 @@ enum DemoData {
             ], fetchedAt: now),
             ProviderSnapshot(provider: .devin, plan: "Pro", metrics: [
                 UsageMetric(id: "devin.weekly", title: "Weekly", usedPercent: 91, resetsAt: later(30), window: .weekly),
-            ], note: "Extra balance $12.50", fetchedAt: now),
+            ], balance: UsageBalance(title: "Extra usage", amount: 12.5), fetchedAt: now),
             ProviderSnapshot(provider: .amp, plan: "Megawatt", metrics: [
                 UsageMetric(id: "amp.agent", title: "AI model", usedPercent: 23, resetsAt: later(22 * 24), detail: "$15.40 / $20 left", window: .monthly),
                 UsageMetric(id: "amp.orb", title: "Orb", usedPercent: 41, resetsAt: later(22 * 24), detail: "443 / 750 h left", window: .monthly),
-            ], fetchedAt: now),
+            ], balance: UsageBalance(title: "Credits", amount: 6.2), fetchedAt: now),
         ]
         return Dictionary(uniqueKeysWithValues: snapshots.map { ($0.provider, ProviderState(snapshot: $0, lastAttempt: now)) })
     }

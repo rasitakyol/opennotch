@@ -50,7 +50,7 @@ public struct DevinProvider: UsageProvider {
         )
         let parsed = Self.parse(json)
         guard !parsed.metrics.isEmpty else { throw ProviderIssue.unexpected("No quota data found") }
-        return ProviderSnapshot(provider: id, plan: parsed.plan, metrics: parsed.metrics, note: parsed.note)
+        return ProviderSnapshot(provider: id, plan: parsed.plan, metrics: parsed.metrics, balance: parsed.balance)
     }
 
     static func loadCredentials() -> Credentials? {
@@ -70,7 +70,7 @@ public struct DevinProvider: UsageProvider {
         return nil
     }
 
-    public static func parse(_ json: JSON) -> (plan: String?, metrics: [UsageMetric], note: String?) {
+    public static func parse(_ json: JSON) -> (plan: String?, metrics: [UsageMetric], balance: UsageBalance?) {
         let status = json["userStatus"]["planStatus"]
         let info = status["planInfo"].isNull ? json["planInfo"] : status["planInfo"]
         var metrics: [UsageMetric] = []
@@ -109,10 +109,10 @@ public struct DevinProvider: UsageProvider {
             metrics.append(UsageMetric(id: "devin.credits", title: "Credits", usedPercent: used / available * 100, resetsAt: planEnd, window: .monthly))
         }
 
-        var note: String?
+        var balance: UsageBalance?
         if let micros = status["overageBalanceMicros"].double, micros > 0 {
-            note = "Extra balance \(UsageFormat.dollars(micros / 1_000_000))"
+            balance = UsageBalance(title: "Extra usage", amount: micros / 1_000_000)
         }
-        return (info["planName"].string, metrics, note)
+        return (info["planName"].string, metrics, balance)
     }
 }

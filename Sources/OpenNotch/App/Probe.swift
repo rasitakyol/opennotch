@@ -24,7 +24,9 @@ enum Probe {
                         let percent = UsageFormat.percent(metric.usedPercent).padding(toLength: 6, withPad: " ", startingAt: 0)
                         print("  \(title)\(percent)\(reset)\(detail)")
                     }
-                    if let note = snapshot.note { print("  \(note)") }
+                    if let balance = snapshot.balance {
+                        print("  \(balance.title.padding(toLength: 22, withPad: " ", startingAt: 0))\(UsageFormat.dollars(balance.amount)) left")
+                    }
                 } catch let issue as ProviderIssue {
                     print("\(id.displayName): \(issue.title) — \(issue.hint(for: id))")
                 } catch {

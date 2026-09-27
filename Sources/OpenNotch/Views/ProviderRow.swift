@@ -106,25 +106,35 @@ struct ProviderRow: View {
     }
 
     private func metricGrid(_ snapshot: ProviderSnapshot) -> some View {
-        let metrics = snapshot.metrics
-        let rows = stride(from: 0, to: metrics.count, by: columns).map { Array(metrics[$0..<min($0 + columns, metrics.count)]) }
-        // A short note (credit balance…) takes a free column instead of adding height.
-        let noteFitsInline = snapshot.note != nil && (rows.last?.count ?? 0) < columns
+        // A balance (extra usage, credits…) takes the slot after the limits, like one more column.
+        let cells = snapshot.metrics.map(GridCell.metric) + (snapshot.balance.map { [GridCell.balance($0)] } ?? [])
+        let rows = stride(from: 0, to: cells.count, by: columns).map { Array(cells[$0..<min($0 + columns, cells.count)]) }
 
         return VStack(alignment: .leading, spacing: 10) {
             ForEach(rows.indices, id: \.self) { index in
                 HStack(alignment: .top, spacing: Layout.metricGap) {
-                    ForEach(rows[index]) { metric in
-                        MetricCell(provider: provider, metric: metric, now: now)
-                    }
-                    if index == rows.count - 1, noteFitsInline, let note = snapshot.note {
-                        NoteCell(text: note)
+                    ForEach(rows[index]) { cell in
+                        switch cell {
+                        case .metric(let metric):
+                            MetricCell(provider: provider, metric: metric, now: now)
+                        case .balance(let balance):
+                            BalanceCell(provider: provider, balance: balance)
+                        }
                     }
                 }
             }
-            if !noteFitsInline, let note = snapshot.note {
-                NoteCell(text: note)
-            }
+        }
+    }
+}
+
+private enum GridCell: Identifiable {
+    case metric(UsageMetric)
+    case balance(UsageBalance)
+
+    var id: String {
+        switch self {
+        case .metric(let metric): metric.id
+        case .balance: "balance"
         }
     }
 }
@@ -139,19 +149,7 @@ struct MetricCell: View {
         let color = Palette.forPercent(percent)
 
         VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(metric.title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 2)
-                Text(UsageFormat.percent(percent))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(color)
-                    .contentTransition(.numericText(value: percent))
-            }
+            CellHeader(title: metric.title, value: UsageFormat.percent(percent), color: color, numericValue: percent)
             UsageBar(fraction: percent / 100, color: color)
             HStack(spacing: 3) {
                 if let reset = metric.resetsAt {
@@ -167,9 +165,7 @@ struct MetricCell: View {
                         .truncationMode(.head)
                 }
             }
-            .font(.system(size: 9.5))
-            .foregroundStyle(Palette.tertiary)
-            .frame(height: 11)
+            .cellCaption()
         }
         .frame(width: Layout.metricWidth)
         .help(tooltip(percent: percent))
@@ -194,7 +190,71 @@ struct MetricCell: View {
     }
 }
 
+/// Money left beyond the plan, drawn in the same frame and rows as `MetricCell` so it lines up with the
+/// limits beside it. A balance has no ceiling to measure against, so the bar's slot stays empty.
+struct BalanceCell: View {
+    let provider: ProviderID
+    let balance: UsageBalance
+
+    var body: some View {
+        let amount = UsageFormat.dollars(balance.amount)
+
+        VStack(alignment: .leading, spacing: 5) {
+            CellHeader(title: balance.title, value: amount, color: Palette.primary, numericValue: balance.amount)
+            Color.clear
+                .frame(height: UsageBar.height)
+            HStack(spacing: 3) {
+                Image(systemName: "creditcard")
+                    .font(.system(size: 8, weight: .semibold))
+                Text("Balance")
+            }
+            .cellCaption()
+        }
+        .frame(width: Layout.metricWidth)
+        .help("\(balance.title): \(amount) left")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(provider.displayName), \(balance.title)")
+        .accessibilityValue("\(amount) left")
+    }
+}
+
+/// First line of every grid cell: what it is on the left, the headline figure on the right.
+private struct CellHeader: View {
+    let title: String
+    let value: String
+    let color: Color
+    /// Drives the rolling-digits transition when the figure changes.
+    let numericValue: Double
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 2)
+            Text(value)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .contentTransition(.numericText(value: numericValue))
+        }
+    }
+}
+
+private extension View {
+    /// Last line of every grid cell (reset countdown, detail, balance label).
+    func cellCaption() -> some View {
+        font(.system(size: 9.5))
+            .foregroundStyle(Palette.tertiary)
+            .frame(height: 11)
+    }
+}
+
 struct UsageBar: View {
+    static let height: CGFloat = 4
+
     let fraction: Double
     let color: Color
 
@@ -208,25 +268,8 @@ struct UsageBar: View {
                     .frame(width: clamped > 0 ? max(4, proxy.size.width * clamped) : 0)
             }
         }
-        .frame(height: 4)
+        .frame(height: Self.height)
         .animation(.spring(response: 0.5, dampingFraction: 0.85), value: fraction)
-    }
-}
-
-private struct NoteCell: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 4) {
-            Image(systemName: "creditcard")
-                .font(.system(size: 9))
-            Text(text)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(.system(size: 10))
-        .foregroundStyle(Palette.tertiary)
-        .frame(width: Layout.metricWidth, alignment: .leading)
-        .padding(.top, 1)
     }
 }
 

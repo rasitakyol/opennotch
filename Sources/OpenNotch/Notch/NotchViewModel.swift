@@ -74,7 +74,11 @@ final class NotchViewModel {
     // MARK: Expanded
 
     var metricColumns: Int {
-        let counts = store.visibleProviders.map { store.states[$0]?.snapshot?.metrics.count ?? 1 }
+        // A balance takes a grid slot of its own, next to the limits.
+        let counts = store.visibleProviders.map { provider -> Int in
+            guard let snapshot = store.states[provider]?.snapshot else { return 1 }
+            return snapshot.metrics.count + (snapshot.balance == nil ? 0 : 1)
+        }
         return min(Layout.maxMetricColumns, max(1, counts.max() ?? 1))
     }
 
