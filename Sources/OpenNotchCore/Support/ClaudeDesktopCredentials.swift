@@ -216,8 +216,8 @@ enum DesktopKeychain {
     /// interaction API is still needed for Electron's legacy item. Abort if the guard cannot be set.
     static func withInteractionPolicy<T>(
         _ interaction: Interaction,
-        get: (UnsafeMutablePointer<DarwinBoolean>) -> OSStatus = { SecKeychainGetUserInteractionAllowed($0) },
-        set: (Bool) -> OSStatus = { SecKeychainSetUserInteractionAllowed($0) },
+        get: (UnsafeMutablePointer<DarwinBoolean>) -> OSStatus = { LegacyInteractionFlag.shared.get($0) },
+        set: (Bool) -> OSStatus = { LegacyInteractionFlag.shared.set($0) },
         read: () throws -> T
     ) throws -> T {
         var previous: DarwinBoolean = false
@@ -228,4 +228,21 @@ enum DesktopKeychain {
         defer { _ = set(previous.boolValue) }
         return try read()
     }
+}
+
+/// Calling the deprecated flag through a protocol keeps this deliberate use from warning on every build,
+/// while any other deprecated call in the module still does.
+private protocol InteractionFlag: Sendable {
+    func get(_ allowed: UnsafeMutablePointer<DarwinBoolean>) -> OSStatus
+    func set(_ allowed: Bool) -> OSStatus
+}
+
+private struct LegacyInteractionFlag: InteractionFlag {
+    static let shared: any InteractionFlag = LegacyInteractionFlag()
+
+    @available(macOS, deprecated: 10.10)
+    func get(_ allowed: UnsafeMutablePointer<DarwinBoolean>) -> OSStatus { SecKeychainGetUserInteractionAllowed(allowed) }
+
+    @available(macOS, deprecated: 10.10)
+    func set(_ allowed: Bool) -> OSStatus { SecKeychainSetUserInteractionAllowed(allowed) }
 }

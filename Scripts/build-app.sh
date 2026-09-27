@@ -17,6 +17,10 @@ cp Resources/Logos/*.svg "$APP/Contents/Resources/Logos/"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Ad-hoc signature so macOS treats the bundle as one app (login item, stable identity).
-codesign --force --sign - --timestamp=none "$APP" >/dev/null
+# Quiet on success, where codesign only notes that it replaced the linker's ad-hoc signature.
+if ! SIGN_OUTPUT="$(codesign --force --sign - --timestamp=none "$APP" 2>&1)"; then
+    echo "$SIGN_OUTPUT" >&2
+    exit 1
+fi
 
 echo "✓ $APP"
