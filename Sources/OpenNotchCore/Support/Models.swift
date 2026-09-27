@@ -140,18 +140,29 @@ public struct UsageMetric: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// Money on the account beyond the plan's limits (Devin extra usage, Amp credits), in US dollars.
+public struct UsageBalance: Codable, Sendable, Hashable {
+    public var title: String
+    public var amount: Double
+
+    public init(title: String, amount: Double) {
+        self.title = title
+        self.amount = amount
+    }
+}
+
 public struct ProviderSnapshot: Codable, Sendable, Equatable {
     public var provider: ProviderID
     public var plan: String?
     public var metrics: [UsageMetric]
-    public var note: String?
+    public var balance: UsageBalance?
     public var fetchedAt: Date
 
-    public init(provider: ProviderID, plan: String?, metrics: [UsageMetric], note: String? = nil, fetchedAt: Date = Date()) {
+    public init(provider: ProviderID, plan: String?, metrics: [UsageMetric], balance: UsageBalance? = nil, fetchedAt: Date = Date()) {
         self.provider = provider
         self.plan = plan
         self.metrics = metrics
-        self.note = note
+        self.balance = balance
         self.fetchedAt = fetchedAt
     }
 

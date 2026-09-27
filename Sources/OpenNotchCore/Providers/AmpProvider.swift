@@ -39,7 +39,7 @@ public struct AmpProvider: UsageProvider {
         }
         let parsed = Self.parse(displayText: text)
         guard !parsed.metrics.isEmpty else { throw ProviderIssue.unexpected("Unrecognized Amp usage format") }
-        return ProviderSnapshot(provider: id, plan: parsed.plan, metrics: parsed.metrics, note: parsed.note)
+        return ProviderSnapshot(provider: id, plan: parsed.plan, metrics: parsed.metrics, balance: parsed.balance)
     }
 
     static func loadCredentials() -> (String, URL)? {
@@ -56,7 +56,7 @@ public struct AmpProvider: UsageProvider {
         return nil
     }
 
-    public static func parse(displayText: String, now: Date = Date()) -> (plan: String?, metrics: [UsageMetric], note: String?) {
+    public static func parse(displayText: String, now: Date = Date()) -> (plan: String?, metrics: [UsageMetric], balance: UsageBalance?) {
         let text = displayText.replacingOccurrences(of: "**", with: "")
         var metrics: [UsageMetric] = []
         var plan: String?
@@ -111,11 +111,11 @@ public struct AmpProvider: UsageProvider {
             ))
         }
 
-        var note: String?
+        var balance: UsageBalance?
         if let credits = firstMatch(#"Individual credits:?\s*\$([\d,]+(?:\.\d+)?) remaining"#, in: text), let value = number(credits[0]) {
-            note = "Credits \(UsageFormat.dollars(value))"
+            balance = UsageBalance(title: "Credits", amount: value)
         }
-        return (plan, metrics, note)
+        return (plan, metrics, balance)
     }
 
     private static func firstMatch(_ pattern: String, in text: String) -> [String]? {

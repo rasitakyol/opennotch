@@ -39,8 +39,8 @@ If you use several AI coding tools, their limits live in five different places: 
 | **Claude** | 5-hour, Weekly, Weekly per model (e.g. Fable) | Claude Code — macOS Keychain item `Claude Code-credentials` (or `~/.claude/.credentials.json`) |
 | **ChatGPT** | Codex limits of your plan (5-hour and/or Weekly) | Codex CLI — `~/.codex/auth.json` |
 | **Cursor** | Grok & Composer pool, Other models pool, Grok Bot | Cursor app (`state.vscdb`) or the Grok Bot app |
-| **Devin** | Weekly quota (plus Daily when your plan shows it) | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
-| **Amp** | AI model (agent) usage, Orb hours | Amp CLI — `~/.local/share/amp/secrets.json` |
+| **Devin** | Weekly quota (plus Daily when your plan shows it), extra usage balance | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
+| **Amp** | AI model (agent) usage, Orb hours, credits balance | Amp CLI — `~/.local/share/amp/secrets.json` |
 
 Tools you aren't signed in to are simply hidden. Each one can also be turned off in Settings.
 

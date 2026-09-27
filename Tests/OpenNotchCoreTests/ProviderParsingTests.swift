@@ -124,7 +124,13 @@ struct DevinParsingTests {
         #expect(parsed.metrics.map(\.title) == ["Weekly"])
         #expect(parsed.metrics[0].usedPercent == 87)
         #expect(parsed.metrics[0].resetsAt == Date(timeIntervalSince1970: 1_790_496_000))
-        #expect(parsed.note == "Extra balance $4.79")
+        #expect(parsed.balance?.title == "Extra usage")
+        #expect(parsed.balance.map { UsageFormat.dollars($0.amount) } == "$4.79")
+    }
+
+    @Test func noBalanceWithoutOverage() throws {
+        let response = #"{"userStatus": {"planStatus": {"weeklyQuotaRemainingPercent": 50, "weeklyQuotaResetAtUnix": "1790496000"}}}"#
+        #expect(DevinProvider.parse(try JSON(string: response)).balance == nil)
     }
 
     @Test func omittedPercentWithResetMeansExhausted() throws {
@@ -154,7 +160,7 @@ struct AmpParsingTests {
         #expect(parsed.metrics[0].detail == "$19.27 / $20 left")
         #expect(parsed.metrics[1].detail == "475 / 750 h left")
         #expect(parsed.metrics[0].resetsAt == ISODate.parse("2026-10-18T00:00:00Z"))
-        #expect(parsed.note == "Credits $8.94")
+        #expect(parsed.balance == UsageBalance(title: "Credits", amount: 8.94))
     }
 
     @Test func markdownVariantParsesTheSame() {
