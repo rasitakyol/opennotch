@@ -1,12 +1,16 @@
 import Foundation
 
-/// Claude subscription limits, read with Claude Code's own OAuth session.
+/// Claude subscription limits, preferring Claude Code with an optional read-only Desktop fallback.
 ///
 /// The token is only read. It is never refreshed here: Claude Code rotates refresh tokens, so
 /// refreshing from a second process could sign the user out of Claude Code.
 public struct ClaudeProvider: UsageProvider {
     public let id = ProviderID.claude
-    private let http: HTTPClient
+    private let requestUsage: @Sendable (URLRequest) async throws -> JSON
+    private let codeCredentials: @Sendable () async -> Credentials?
+    private let detectCode: @Sendable () async -> Bool
+    private let desktop: ClaudeDesktopCredentials
+    private let desktopFallbackEnabled: @Sendable () async -> Bool
 
     static let keychainService = "Claude Code-credentials"
     static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
@@ -18,8 +22,35 @@ public struct ClaudeProvider: UsageProvider {
         let rateLimitTier: String?
     }
 
-    public init(http: HTTPClient = .shared) {
-        self.http = http
+    public init(
+        http: HTTPClient = .shared,
+        desktop: ClaudeDesktopCredentials = .init(),
+        desktopFallbackEnabled: @escaping @Sendable () async -> Bool = { false }
+    ) {
+        self.init(
+            requestUsage: { try await http.json($0) },
+            codeCredentials: { await Self.loadCredentials() },
+            detectCode: {
+                if Self.credentialFiles.contains(where: LocalFiles.exists) { return true }
+                return await Keychain.hasGenericPassword(service: Self.keychainService)
+            },
+            desktop: desktop,
+            desktopFallbackEnabled: desktopFallbackEnabled
+        )
+    }
+
+    init(
+        requestUsage: @escaping @Sendable (URLRequest) async throws -> JSON,
+        codeCredentials: @escaping @Sendable () async -> Credentials?,
+        detectCode: @escaping @Sendable () async -> Bool,
+        desktop: ClaudeDesktopCredentials,
+        desktopFallbackEnabled: @escaping @Sendable () async -> Bool = { false }
+    ) {
+        self.requestUsage = requestUsage
+        self.codeCredentials = codeCredentials
+        self.detectCode = detectCode
+        self.desktop = desktop
+        self.desktopFallbackEnabled = desktopFallbackEnabled
     }
 
     static var credentialFiles: [String] {
@@ -32,33 +63,60 @@ public struct ClaudeProvider: UsageProvider {
     }
 
     public func detect() async -> Bool {
-        if Self.credentialFiles.contains(where: LocalFiles.exists) { return true }
-        return await Keychain.hasGenericPassword(service: Self.keychainService)
+        if await detectCode() { return true }
+        return await desktopFallbackEnabled() && desktop.isPresent
     }
 
     public func fetch() async throws -> ProviderSnapshot {
-        guard let credentials = await loadCredentials() else { throw ProviderIssue.notConfigured }
-        if let expiresAt = credentials.expiresAt, expiresAt <= Date().addingTimeInterval(30) {
-            throw ProviderIssue.expired
+        let codeIssue: ProviderIssue
+        if let credentials = await codeCredentials() {
+            if let expiresAt = credentials.expiresAt, expiresAt <= Date().addingTimeInterval(30) {
+                codeIssue = .expired
+            } else {
+                do {
+                    return try await fetchUsage(credentials, source: "Claude Code session")
+                } catch ProviderIssue.unauthorized {
+                    codeIssue = .unauthorized
+                }
+            }
+        } else {
+            codeIssue = .notConfigured
         }
 
+        // Transport errors, rate limits and server failures do not cause a credential switch.
+        guard await desktopFallbackEnabled() else { throw codeIssue }
+        let token = try await desktop.readWithoutInteraction()
+        try Task.checkCancellation()
+        // Recheck after the asynchronous read: turning the fallback off prevents a queued request.
+        guard await desktopFallbackEnabled() else { throw codeIssue }
+        guard token.expiresAt > Date().addingTimeInterval(30) else { throw ProviderIssue.claudeDesktop(.expired) }
+        let credentials = Credentials(accessToken: token.accessToken, expiresAt: token.expiresAt, subscriptionType: nil, rateLimitTier: nil)
+        do {
+            return try await fetchUsage(credentials, source: "Claude Desktop session")
+        } catch ProviderIssue.unauthorized {
+            throw ProviderIssue.claudeDesktop(.rejected)
+        }
+    }
+
+    private func fetchUsage(_ credentials: Credentials, source: String) async throws -> ProviderSnapshot {
         var request = URLRequest(url: Self.usageURL)
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        let json = try await http.json(request)
+        let json = try await requestUsage(request)
 
         let metrics = Self.parseUsage(json)
         guard !metrics.isEmpty else { throw ProviderIssue.unexpected("No usage limits found") }
         return ProviderSnapshot(
             provider: id,
             plan: Self.planName(subscription: credentials.subscriptionType, tier: credentials.rateLimitTier),
-            metrics: metrics
+            metrics: metrics,
+            credentialSource: source
         )
     }
 
     /// Keychain is where current Claude Code versions keep the session; the JSON file is the older/Linux location.
     /// Whichever is freshest wins, so a stale leftover file never shadows a valid keychain token.
-    private func loadCredentials() async -> Credentials? {
+    private static func loadCredentials() async -> Credentials? {
         var candidates: [Credentials] = []
         if let secret = await Keychain.genericPassword(service: Self.keychainService),
            let credentials = Self.parseCredentials(Data(secret.utf8)) {

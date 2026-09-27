@@ -13,10 +13,13 @@ final class UsageStore {
     private(set) var lastRefresh: Date?
     private(set) var nextRefresh: Date?
     private(set) var hasDetected = false
+    private(set) var isAuthorizingClaudeDesktop = false
+    private(set) var claudeDesktopAccessIssue: ProviderIssue?
 
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let providers: [ProviderID: any UsageProvider]
-    @ObservationIgnored private let cache = SnapshotCache()
+    @ObservationIgnored private let requestClaudeDesktopAccess: @Sendable () async throws -> Void
+    @ObservationIgnored private let cache: SnapshotCache?
     @ObservationIgnored private var timer: Task<Void, Never>?
     @ObservationIgnored private var refreshQueued = false
     @ObservationIgnored private let logger = Logger(subsystem: "app.opennotch.OpenNotch", category: "store")
@@ -24,10 +27,46 @@ final class UsageStore {
     /// Automatic refreshes never run closer together than this, even around window resets.
     private static let minimumGap: TimeInterval = 60
 
-    init(settings: AppSettings, providers: [ProviderID: any UsageProvider] = ProviderRegistry.makeAll(), loadCache: Bool = true) {
+    init(
+        settings: AppSettings,
+        providers: [ProviderID: any UsageProvider]? = nil,
+        loadCache: Bool = true,
+        requestClaudeDesktopAccess: @escaping @Sendable () async throws -> Void = {
+            try await ClaudeDesktopCredentials().requestAccessFromSettings()
+        }
+    ) {
         self.settings = settings
-        self.providers = providers
-        if loadCache { states = cache.load() }
+        self.requestClaudeDesktopAccess = requestClaudeDesktopAccess
+        self.providers = providers ?? ProviderRegistry.makeAll(
+            claudeDesktopFallbackEnabled: {
+                await MainActor.run { settings.claudeDesktopFallbackEnabled && settings.isEnabled(.claude) }
+            }
+        )
+        // Demo/test stores must not read or write the real usage cache.
+        cache = loadCache ? SnapshotCache() : nil
+        if let cache { states = cache.load() }
+    }
+
+    /// Called only by the Settings toggle. Loading preferences, detection, probes and refreshes never
+    /// use this interactive path. Persist the opt-in only after the user permits a successful read.
+    func setClaudeDesktopFallbackEnabled(_ enabled: Bool) async {
+        guard !isAuthorizingClaudeDesktop else { return }
+        claudeDesktopAccessIssue = nil
+        guard enabled else {
+            settings.claudeDesktopFallbackEnabled = false
+            return
+        }
+        guard !settings.claudeDesktopFallbackEnabled else { return }
+        isAuthorizingClaudeDesktop = true
+        defer { isAuthorizingClaudeDesktop = false }
+        do {
+            try await requestClaudeDesktopAccess()
+            settings.claudeDesktopFallbackEnabled = true
+        } catch let issue as ProviderIssue {
+            claudeDesktopAccessIssue = issue
+        } catch {
+            claudeDesktopAccessIssue = .claudeDesktop(.keychainUnavailable)
+        }
     }
 
     /// A store filled with invented numbers, for rendering documentation images.
@@ -93,7 +132,7 @@ final class UsageStore {
 
             lastRefresh = Date()
             isRefreshing = false
-            cache.save(states)
+            cache?.save(states)
             if refreshQueued {
                 refreshQueued = false
                 refresh()

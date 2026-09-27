@@ -26,5 +26,10 @@ let package = Package(
             dependencies: ["OpenNotchCore"],
             path: "Tests/OpenNotchCoreTests"
         ),
+        .testTarget(
+            name: "OpenNotchAppTests",
+            dependencies: ["OpenNotch"],
+            path: "Tests/OpenNotchAppTests"
+        ),
     ]
 )

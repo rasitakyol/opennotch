@@ -38,6 +38,7 @@ final class AppSettings {
         static let disabledProviders = "disabledProviders"
         static let hoverToOpen = "hoverToOpen"
         static let haptics = "haptics"
+        static let claudeDesktopFallbackEnabled = "claudeDesktopFallbackEnabled"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -70,6 +71,13 @@ final class AppSettings {
         didSet { defaults.set(haptics, forKey: Keys.haptics) }
     }
 
+    var claudeDesktopFallbackEnabled: Bool {
+        didSet {
+            defaults.set(claudeDesktopFallbackEnabled, forKey: Keys.claudeDesktopFallbackEnabled)
+            onFetchSettingsChange?()
+        }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let minutes = defaults.integer(forKey: Keys.refreshMinutes)
@@ -78,6 +86,7 @@ final class AppSettings {
         disabledProviders = Set((defaults.stringArray(forKey: Keys.disabledProviders) ?? []).compactMap(ProviderID.init(rawValue:)))
         hoverToOpen = defaults.object(forKey: Keys.hoverToOpen) as? Bool ?? true
         haptics = defaults.object(forKey: Keys.haptics) as? Bool ?? true
+        claudeDesktopFallbackEnabled = defaults.bool(forKey: Keys.claudeDesktopFallbackEnabled)
     }
 
     var refreshInterval: TimeInterval { TimeInterval(refreshMinutes * 60) }
