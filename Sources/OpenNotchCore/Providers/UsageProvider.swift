@@ -12,9 +12,13 @@ public protocol UsageProvider: Sendable {
 }
 
 public enum ProviderRegistry {
-    public static func makeAll(http: HTTPClient = .shared) -> [ProviderID: any UsageProvider] {
+    public static func makeAll(
+        http: HTTPClient = .shared,
+        claudeDesktop: ClaudeDesktopCredentials = .init(),
+        claudeDesktopFallbackEnabled: @escaping @Sendable () async -> Bool = { false }
+    ) -> [ProviderID: any UsageProvider] {
         [
-            .claude: ClaudeProvider(http: http),
+            .claude: ClaudeProvider(http: http, desktop: claudeDesktop, desktopFallbackEnabled: claudeDesktopFallbackEnabled),
             .chatgpt: ChatGPTProvider(http: http),
             .cursor: CursorProvider(http: http),
             .devin: DevinProvider(http: http),

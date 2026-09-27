@@ -156,13 +156,15 @@ public struct ProviderSnapshot: Codable, Sendable, Equatable {
     public var plan: String?
     public var metrics: [UsageMetric]
     public var balance: UsageBalance?
+    public var credentialSource: String?
     public var fetchedAt: Date
 
-    public init(provider: ProviderID, plan: String?, metrics: [UsageMetric], balance: UsageBalance? = nil, fetchedAt: Date = Date()) {
+    public init(provider: ProviderID, plan: String?, metrics: [UsageMetric], balance: UsageBalance? = nil, credentialSource: String? = nil, fetchedAt: Date = Date()) {
         self.provider = provider
         self.plan = plan
         self.metrics = metrics
         self.balance = balance
+        self.credentialSource = credentialSource
         self.fetchedAt = fetchedAt
     }
 
@@ -181,6 +183,7 @@ public enum ProviderIssue: Error, Codable, Sendable, Equatable {
     case timeout
     case server(status: Int)
     case unexpected(String)
+    case claudeDesktop(ClaudeDesktopIssue)
 
     public var title: String {
         switch self {
@@ -192,6 +195,7 @@ public enum ProviderIssue: Error, Codable, Sendable, Equatable {
         case .timeout: "Timed out"
         case .server(let status): "Server error (\(status))"
         case .unexpected: "Unexpected response"
+        case .claudeDesktop(let issue): issue.title
         }
     }
 
@@ -203,6 +207,7 @@ public enum ProviderIssue: Error, Codable, Sendable, Equatable {
         case .rateLimited, .timeout, .server: "Will retry on the next refresh."
         case .offline: "Will refresh when you're back online."
         case .unexpected(let detail): detail
+        case .claudeDesktop(let issue): issue.hint
         }
     }
 }

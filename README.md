@@ -36,7 +36,7 @@ If you use several AI coding tools, their limits live in five different places: 
 
 | Service | Limits shown | Session it reads |
 | --- | --- | --- |
-| **Claude** | 5-hour, Weekly, Weekly per model (e.g. Fable) | Claude Code — macOS Keychain item `Claude Code-credentials` (or `~/.claude/.credentials.json`) |
+| **Claude** | 5-hour, Weekly, Weekly per model (e.g. Fable) | Claude Code — macOS Keychain item `Claude Code-credentials` (or `~/.claude/.credentials.json`); optional Claude Desktop fallback |
 | **ChatGPT** | Codex limits of your plan (5-hour and/or Weekly) | Codex CLI — `~/.codex/auth.json` |
 | **Cursor** | Grok & Composer pool, Other models pool, Grok Bot | Cursor app (`state.vscdb`) or the Grok Bot app |
 | **Devin** | Weekly quota (plus Daily when your plan shows it), extra usage balance | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
@@ -66,6 +66,18 @@ make install
 
 **Settings:** refresh interval, what the closed notch shows (most critical limit / all services / notch only), open on hover, haptic feedback, launch at login, and which services to track.
 
+### Optional Claude Desktop fallback
+
+In **Settings → Claude Desktop fallback**, turn on **Use Claude Desktop when needed**. It is off by default. OpenNotch still tries Claude Code first; it reads Desktop's Code session only if the CLI session is missing, expired or rejected by the usage API. Network errors and rate limits do not switch sessions. A Desktop-only installation is supported after opting in and signing in through Desktop's **Code** tab.
+
+- Enabling the setting is the only action that can ask for the **Claude Safe Storage** Keychain item. **Always Allow** permits later reads without a dialog. Denying access leaves the setting off.
+- This is also the key that protects Desktop's cookies. Although OpenNotch only reads the Code token cache, granting access means trusting it with a key capable of decrypting those other values.
+- Startup, detection, refreshes, wake from sleep and `--probe` never request Desktop Keychain permission. If access is unavailable, they report an error; turn the setting off and on to authorize again. Ad-hoc builds can require permission again after rebuilding.
+- Desktop owns token renewal. OpenNotch reads `~/Library/Application Support/Claude/config.json` (`oauth:tokenCacheV2`) and the Keychain key, decrypts the access token in memory, and sends it only to the usage endpoint below. It never writes Desktop files, reads cookie databases, uses refresh tokens or persists credentials.
+- The format is undocumented and can change. An unreadable cache produces an actionable error; OpenNotch does not try other Desktop storage. Settings and `--probe` show which session supplied the latest reading. The CLI and Desktop may be signed in to different accounts.
+
+The cache format was researched from [Notchlet PR #29](https://github.com/SiebeBaree/Notchlet/pull/29). This fallback supplies the same current usage windows as the CLI; it does not import conversations or a historical usage timeline.
+
 ## How it works
 
 For every tool, OpenNotch reads the token that tool already keeps on your Mac and asks the same backend that powers the tool's own usage screen:
@@ -82,7 +94,7 @@ For every tool, OpenNotch reads the token that tool already keeps on your Mac an
 
 - Tokens are never refreshed by OpenNotch. These tools rotate their refresh tokens, so refreshing from a second app could sign you out of the tool itself. If a session expires, OpenNotch keeps the last numbers and asks you to open that tool once.
 - The Claude Code Keychain item is read through `/usr/bin/security`, the same tool Claude Code uses to write it, so no extra permission prompt appears.
-- Only usage numbers and plan names are cached, in `~/Library/Application Support/OpenNotch/usage-cache.json`.
+- Only usage readings, plan names, session-source labels and refresh status are cached, in `~/Library/Application Support/OpenNotch/usage-cache.json`.
 - These endpoints are undocumented and may change. If a service stops working, please open an issue.
 
 ## Troubleshooting
@@ -96,7 +108,7 @@ build/OpenNotch.app/Contents/MacOS/OpenNotch --probe
 ## Development
 
 ```bash
-make test                 # parser and formatting tests
+make test                 # parsing, credential fallback, permission policy and settings tests
 make run                  # build the .app into build/ and launch it
 make probe                # run the live provider check from source
 make icon                 # regenerate the app icon
@@ -112,6 +124,8 @@ Tests/                  parsing tests built from real (anonymised) responses
 ```
 
 Adding a service means implementing `UsageProvider` (`detect()` + `fetch()`), registering it in `ProviderRegistry`, and dropping its SVG logo into `Resources/Logos`.
+
+For the Desktop integration's local permission checks, see [the manual verification steps](docs/claude-desktop-fallback.md). Automated tests use synthetic encrypted fixtures and injected Keychain/network responses, never personal credentials.
 
 ## Disclaimer
 
