@@ -142,6 +142,68 @@ struct DevinParsingTests {
     }
 }
 
+@Suite("Antigravity")
+struct AntigravityParsingTests {
+    let response = """
+    {
+      "groups": [
+        {
+          "buckets": [
+            {"bucketId": "gemini-weekly", "displayName": "Weekly Limit Remaining", "window": "weekly",
+             "resetTime": "2026-10-08T06:23:55Z", "remainingFraction": 0.82},
+            {"bucketId": "gemini-5h", "displayName": "Five Hour Limit Remaining", "window": "5h",
+             "resetTime": "2026-10-01T11:23:55Z", "remainingFraction": 0.4}
+          ],
+          "displayName": "Gemini Models",
+          "description": "Models within this group: Gemini Flash, Gemini Pro"
+        },
+        {
+          "buckets": [
+            {"bucketId": "3p-weekly", "displayName": "Weekly Limit Remaining", "window": "weekly",
+             "resetTime": "2026-10-08T06:23:55Z", "remainingFraction": 1},
+            {"bucketId": "3p-5h", "displayName": "Five Hour Limit Remaining", "window": "5h",
+             "resetTime": "2026-10-01T11:23:55Z", "remainingFraction": 0}
+          ],
+          "displayName": "Claude and GPT models",
+          "description": "Models within this group: Claude Opus, Claude Sonnet, GPT-OSS"
+        }
+      ],
+      "description": "Within each group, models share a weekly limit and a 5-hour limit."
+    }
+    """
+
+    @Test func geminiCellsThenOtherModelsPool() throws {
+        let metrics = AntigravityProvider.parse(quotaSummary: try JSON(string: response))
+        #expect(metrics.map(\.title) == ["Gemini 5-hour", "Gemini weekly", "Other models 5-hour", "Other models weekly"])
+        #expect(metrics.map(\.group) == [nil, nil, "Other models", "Other models"])
+        #expect(metrics.map { $0.usedPercent.rounded() } == [60, 18, 100, 0])
+        #expect(metrics[0].resetsAt == ISODate.parse("2026-10-01T11:23:55Z"))
+        #expect(metrics[2].detail == "Claude Opus, Claude Sonnet, GPT-OSS")
+        #expect(metrics[0].detail == nil)
+    }
+
+    @Test func untouchedWindowHasNoReset() throws {
+        let metrics = AntigravityProvider.parse(quotaSummary: try JSON(string: response))
+        // A full window reports "now + 7 days", which would slide on every refresh.
+        #expect(metrics[3].resetsAt == nil)
+    }
+
+    @Test func disabledBucketsAreSkipped() throws {
+        let json = try JSON(string: #"{"groups": [{"displayName": "Gemini Models", "buckets": [{"bucketId": "gemini-5h", "window": "5h", "remainingFraction": 0.5, "disabled": true}, {"bucketId": "gemini-weekly", "window": "weekly", "remainingFraction": 0.5}]}]}"#)
+        #expect(AntigravityProvider.parse(quotaSummary: json).map(\.id) == ["antigravity.gemini-weekly"])
+    }
+
+    @Test func credentialsAndPlan() throws {
+        let blob = #"{"token": {"access_token": "t", "token_type": "Bearer", "refresh_token": "r", "expiry": "2026-10-01T09:46:09.20065+03:00"}, "auth_method": "consumer"}"#
+        let credentials = AntigravityProvider.parseCredentials(Data(blob.utf8))
+        #expect(credentials?.accessToken == "t")
+        #expect(credentials?.expiresAt == ISODate.parse("2026-10-01T06:46:09.200Z"))
+        #expect(AntigravityProvider.planName(try JSON(string: #"{"currentTier": {"id": "free-tier", "name": "Antigravity"}}"#)) == "Free")
+        #expect(AntigravityProvider.planName(try JSON(string: #"{"currentTier": {"id": "free-tier"}, "paidTier": {"id": "g1-ultra-lite-tier", "name": "Google AI Ultra"}}"#)) == "Ultra")
+        #expect(AntigravityProvider.planName(try JSON(string: "{}")) == nil)
+    }
+}
+
 @Suite("Amp")
 struct AmpParsingTests {
     let now = ISODate.parse("2026-09-25T19:30:00Z")!
@@ -183,7 +245,8 @@ struct AmpParsingTests {
 struct FormattingTests {
     @Test func percentAndDurations() {
         #expect(UsageFormat.percent(69.4) == "69%")
-        #expect(UsageFormat.percent(0.3) == "<1%")
+        #expect(UsageFormat.percent(0.3) == "0%")
+        #expect(UsageFormat.percent(0.6) == "1%")
         #expect(UsageFormat.percent(130) == "100%")
         #expect(UsageFormat.duration(4 * 3_600 + 48 * 60) == "4h 48m")
         #expect(UsageFormat.duration(30 * 3_600) == "1d 6h")

@@ -12,6 +12,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
     case chatgpt
     case cursor
     case devin
+    case antigravity
     case amp
 
     public var id: String { rawValue }
@@ -22,6 +23,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .chatgpt: "ChatGPT"
         case .cursor: "Cursor"
         case .devin: "Devin"
+        case .antigravity: "Antigravity"
         case .amp: "Amp"
         }
     }
@@ -33,6 +35,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .chatgpt: "Codex session (~/.codex/auth.json)"
         case .cursor: "Cursor / Grok Bot session"
         case .devin: "Devin CLI / Devin Desktop session"
+        case .antigravity: "Antigravity / agy CLI session"
         case .amp: "Amp CLI session"
         }
     }
@@ -44,6 +47,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .chatgpt: "Run `codex login` and sign in with ChatGPT."
         case .cursor: "Sign in to Cursor or Grok Bot."
         case .devin: "Run `devin auth login` in Terminal."
+        case .antigravity: "Sign in to Antigravity or run `agy`."
         case .amp: "Run `amp login` in Terminal."
         }
     }
@@ -55,6 +59,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .chatgpt: "Run Codex once to refresh the session."
         case .cursor: "Open Cursor to refresh the session."
         case .devin: "Open Devin to refresh the session."
+        case .antigravity: "Open Antigravity or run `agy` to refresh the session."
         case .amp: "Run Amp to refresh the session."
         }
     }
@@ -65,6 +70,8 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .chatgpt: URL(string: "https://chatgpt.com/codex/settings/usage")
         case .cursor: URL(string: "https://cursor.com/dashboard?tab=usage")
         case .devin: URL(string: "https://app.devin.ai")
+        // Antigravity shows its limits only inside the app.
+        case .antigravity: nil
         case .amp: URL(string: "https://ampcode.com/settings")
         }
     }
@@ -118,14 +125,18 @@ public struct UsageMetric: Codable, Sendable, Hashable, Identifiable {
     public var resetsAt: Date?
     public var detail: String?
     public var window: UsageWindow
+    /// Limits of one shared pool (e.g. Antigravity's 5-hour and weekly for non-Gemini models) carry the
+    /// pool's name here and are drawn together in a single cell titled with it.
+    public var group: String?
 
-    public init(id: String, title: String, usedPercent: Double, resetsAt: Date? = nil, detail: String? = nil, window: UsageWindow) {
+    public init(id: String, title: String, usedPercent: Double, resetsAt: Date? = nil, detail: String? = nil, window: UsageWindow, group: String? = nil) {
         self.id = id
         self.title = title
         self.usedPercent = usedPercent
         self.resetsAt = resetsAt
         self.detail = detail
         self.window = window
+        self.group = group
     }
 
     /// Once a window has reset the cached number is no longer true, so it reads as empty until the next fetch.

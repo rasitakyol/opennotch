@@ -6,6 +6,7 @@ struct SettingsView: View {
     let store: UsageStore
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var loginNeedsApproval = LaunchAtLogin.needsApproval
+    @State private var draggedProvider: ProviderID?
 
     var body: some View {
         Form {
@@ -46,7 +47,7 @@ struct SettingsView: View {
             }
 
             Section {
-                ForEach(ProviderID.allCases) { provider in
+                ForEach(settings.providerOrder) { provider in
                     ProviderSettingRow(
                         provider: provider,
                         detected: store.detected.contains(provider),
@@ -56,6 +57,12 @@ struct SettingsView: View {
                             set: { settings.setEnabled(provider, $0) }
                         )
                     )
+                    // A grouped Form is not a List on macOS, so `onMove` does nothing here.
+                    .onDrag {
+                        draggedProvider = provider
+                        return NSItemProvider(object: provider.rawValue as NSString)
+                    }
+                    .onDrop(of: [.text], delegate: ProviderReorderDelegate(target: provider, settings: settings, dragged: $draggedProvider))
                 }
             } header: {
                 HStack {
@@ -72,9 +79,13 @@ struct SettingsView: View {
                     .disabled(store.isRefreshing)
                 }
             } footer: {
-                Text("OpenNotch only reads sessions these tools already keep on your Mac. Credentials are never copied, stored or refreshed — they are only sent to each service's own server.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Drag services to change their order in the notch.")
+                    Text("OpenNotch only reads sessions these tools already keep on your Mac. Credentials are never copied, stored or refreshed — they are only sent to each service's own server.")
+                }
+                .multilineTextAlignment(.leading)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Section {
@@ -130,6 +141,30 @@ struct SettingsView: View {
     }
 }
 
+/// Reorders live: the dragged service takes each row's place as the pointer passes over it, so the drop
+/// itself only ends the drag.
+private struct ProviderReorderDelegate: DropDelegate {
+    let target: ProviderID
+    let settings: AppSettings
+    @Binding var dragged: ProviderID?
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged else { return }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            settings.moveProvider(dragged, to: target)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dragged = nil
+        return true
+    }
+}
+
 private struct ProviderSettingRow: View {
     let provider: ProviderID
     let detected: Bool
@@ -138,6 +173,10 @@ private struct ProviderSettingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             BrandLogo(provider: provider, size: 20, tint: .primary)
                 .frame(width: 28, height: 24)
             VStack(alignment: .leading, spacing: 2) {
@@ -150,13 +189,15 @@ private struct ProviderSettingRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Toggle("", isOn: $isOn)
+            // A service that isn't on this Mac reads as off; its saved choice returns with it.
+            Toggle("", isOn: detected ? $isOn : .constant(false))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .disabled(!detected)
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
         .help(credentialSource)
     }
 

@@ -36,6 +36,7 @@ final class AppSettings {
         static let refreshMinutes = "refreshMinutes"
         static let collapsedStyle = "collapsedStyle"
         static let disabledProviders = "disabledProviders"
+        static let providerOrder = "providerOrder"
         static let hoverToOpen = "hoverToOpen"
         static let haptics = "haptics"
         static let claudeDesktopFallbackEnabled = "claudeDesktopFallbackEnabled"
@@ -63,6 +64,11 @@ final class AppSettings {
         }
     }
 
+    /// Every provider, in the order the notch lists them. Rearranged by dragging in Settings.
+    var providerOrder: [ProviderID] {
+        didSet { defaults.set(providerOrder.map(\.rawValue), forKey: Keys.providerOrder) }
+    }
+
     var hoverToOpen: Bool {
         didSet { defaults.set(hoverToOpen, forKey: Keys.hoverToOpen) }
     }
@@ -84,12 +90,39 @@ final class AppSettings {
         refreshMinutes = Self.refreshOptions.contains(minutes) ? minutes : 15
         collapsedStyle = CollapsedStyle(rawValue: defaults.string(forKey: Keys.collapsedStyle) ?? "") ?? .critical
         disabledProviders = Set((defaults.stringArray(forKey: Keys.disabledProviders) ?? []).compactMap(ProviderID.init(rawValue:)))
+        providerOrder = Self.completeOrder((defaults.stringArray(forKey: Keys.providerOrder) ?? []).compactMap(ProviderID.init(rawValue:)))
         hoverToOpen = defaults.object(forKey: Keys.hoverToOpen) as? Bool ?? true
         haptics = defaults.object(forKey: Keys.haptics) as? Bool ?? true
         claudeDesktopFallbackEnabled = defaults.bool(forKey: Keys.claudeDesktopFallbackEnabled)
     }
 
     var refreshInterval: TimeInterval { TimeInterval(refreshMinutes * 60) }
+
+    /// The saved order, with providers it doesn't know yet (added in a later version) slotted in ahead of
+    /// the provider that follows them by default.
+    static func completeOrder(_ saved: [ProviderID]) -> [ProviderID] {
+        var order: [ProviderID] = []
+        for provider in saved where !order.contains(provider) { order.append(provider) }
+        for provider in ProviderID.allCases where !order.contains(provider) {
+            let successors = ProviderID.allCases.drop { $0 != provider }.dropFirst()
+            let index = successors.lazy.compactMap { order.firstIndex(of: $0) }.first ?? order.endIndex
+            order.insert(provider, at: index)
+        }
+        return order
+    }
+
+    /// Puts `provider` in `target`'s place and shifts the providers in between, as dragging one row onto
+    /// another in Settings does.
+    func moveProvider(_ provider: ProviderID, to target: ProviderID) {
+        guard provider != target,
+              let from = providerOrder.firstIndex(of: provider),
+              let to = providerOrder.firstIndex(of: target)
+        else { return }
+        var order = providerOrder
+        order.remove(at: from)
+        order.insert(provider, at: to)
+        providerOrder = order
+    }
 
     func isEnabled(_ provider: ProviderID) -> Bool {
         !disabledProviders.contains(provider)

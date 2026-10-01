@@ -131,7 +131,7 @@ private struct EmptyStateView: View {
                 Text("No sessions to track")
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(Palette.primary)
-                Text("Sign in to Claude Code, Codex, Cursor, Devin or Amp, or turn services on in Settings.")
+                Text("Sign in to Claude Code, Codex, Cursor, Devin, Antigravity or Amp, or turn services on in Settings.")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.tertiary)
                     .multilineTextAlignment(.center)

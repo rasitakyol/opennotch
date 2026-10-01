@@ -22,6 +22,7 @@ public enum ProviderRegistry {
             .chatgpt: ChatGPTProvider(http: http),
             .cursor: CursorProvider(http: http),
             .devin: DevinProvider(http: http),
+            .antigravity: AntigravityProvider(http: http),
             .amp: AmpProvider(http: http),
         ]
     }

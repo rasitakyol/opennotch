@@ -6,16 +6,16 @@
 
 <p align="center">
   <b>Your AI usage limits, living in your MacBook's notch.</b><br>
-  Claude · ChatGPT (Codex) · Cursor · Devin · Amp — read with the sessions already on your Mac. No API keys.
+  Claude · ChatGPT (Codex) · Cursor · Devin · Antigravity · Amp — read with the sessions already on your Mac. No API keys.
 </p>
 
 <p align="center">
-  <img src="docs/images/notch-open.png" width="640" alt="OpenNotch open, showing usage limits for Claude, ChatGPT, Cursor, Devin and Amp">
+  <img src="docs/images/notch-open.png" width="640" alt="OpenNotch open, showing usage limits for Claude, ChatGPT, Cursor, Devin, Antigravity and Amp">
 </p>
 
 ## Why
 
-If you use several AI coding tools, their limits live in five different places: a 5-hour window here, a weekly quota there, a monthly pool somewhere else. OpenNotch puts all of them in one glanceable spot — the notch — so you know which tool still has headroom before you start a long task.
+If you use several AI coding tools, their limits live in six different places: a 5-hour window here, a weekly quota there, a monthly pool somewhere else. OpenNotch puts all of them in one glanceable spot — the notch — so you know which tool still has headroom before you start a long task.
 
 ## Features
 
@@ -40,9 +40,10 @@ If you use several AI coding tools, their limits live in five different places: 
 | **ChatGPT** | Codex limits of your plan (5-hour and/or Weekly) | Codex CLI — `~/.codex/auth.json` |
 | **Cursor** | Grok & Composer pool, Other models pool, Grok Bot | Cursor app (`state.vscdb`) or the Grok Bot app |
 | **Devin** | Weekly quota (plus Daily when your plan shows it), extra usage balance | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
+| **Antigravity** | Gemini models 5-hour and Weekly; Other models (Claude, GPT-OSS) 5-hour and Weekly, shared in one cell | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token` |
 | **Amp** | AI model (agent) usage, Orb hours, credits balance | Amp CLI — `~/.local/share/amp/secrets.json` |
 
-Tools you aren't signed in to are simply hidden. Each one can also be turned off in Settings.
+Tools you aren't signed in to are simply hidden. Each one can also be turned off in Settings, and dragged into the order you want.
 
 ## Install
 
@@ -64,7 +65,7 @@ make install
 - Hover a row and click **↗** to open that service's own usage page.
 - A **⚠︎** next to a name means the latest refresh failed; the last known numbers stay visible and the tooltip tells you how to fix it.
 
-**Settings:** refresh interval, what the closed notch shows (most critical limit / all services / notch only), open on hover, haptic feedback, launch at login, and which services to track.
+**Settings:** refresh interval, what the closed notch shows (most critical limit / all services / notch only), open on hover, haptic feedback, launch at login, which services to track, and their order (drag a row to move it).
 
 ### Optional Claude Desktop fallback
 
@@ -88,11 +89,13 @@ For every tool, OpenNotch reads the token that tool already keeps on your Mac an
 | ChatGPT | `GET https://chatgpt.com/backend-api/wham/usage` |
 | Cursor | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` and `…/GetSandUsageStatus` (Grok Bot) |
 | Devin | `POST https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus` |
+| Antigravity | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` and `…:loadCodeAssist` (plan) |
 | Amp | `POST https://ampcode.com/api/internal?userDisplayBalanceInfo` (the call behind `amp usage`) |
 
 **Privacy notes**
 
 - Tokens are never refreshed by OpenNotch. These tools rotate their refresh tokens, so refreshing from a second app could sign you out of the tool itself. If a session expires, OpenNotch keeps the last numbers and asks you to open that tool once.
+- Antigravity's Google access token lasts about an hour and is renewed by Antigravity while the app or `agy` runs; when neither has run for a while, the row shows the last numbers until you open one of them. Its backend only answers Antigravity clients, so these two requests identify as the installed Antigravity app.
 - The Claude Code Keychain item is read through `/usr/bin/security`, the same tool Claude Code uses to write it, so no extra permission prompt appears.
 - Only usage readings, plan names, session-source labels and refresh status are cached, in `~/Library/Application Support/OpenNotch/usage-cache.json`.
 - These endpoints are undocumented and may change. If a service stops working, please open an issue.
@@ -129,7 +132,7 @@ For the Desktop integration's local permission checks, see [the manual verificat
 
 ## Disclaimer
 
-OpenNotch is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Anysphere (Cursor), Cognition (Devin) or Amp. Product names and logos are trademarks of their respective owners and are used only to identify the services.
+OpenNotch is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Anysphere (Cursor), Cognition (Devin), Google (Antigravity) or Amp. Product names and logos are trademarks of their respective owners and are used only to identify the services.
 
 ## License
 
