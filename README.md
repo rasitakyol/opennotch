@@ -40,7 +40,7 @@ If you use several AI coding tools, their limits live in six different places: a
 | **ChatGPT** | Codex limits of your plan (5-hour and/or Weekly) | Codex CLI — `~/.codex/auth.json` |
 | **Cursor** | Grok & Composer pool, Other models pool, Grok Bot | Cursor app (`state.vscdb`) or the Grok Bot app |
 | **Devin** | Weekly quota (plus Daily when your plan shows it), extra usage balance | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
-| **Antigravity** | Gemini models 5-hour and Weekly; Other models (Claude, GPT-OSS) 5-hour and Weekly, shared in one cell | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token` |
+| **Antigravity** | Gemini models 5-hour and Weekly; Other models (Claude, GPT-OSS) 5-hour and Weekly, shared in one cell | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running Antigravity app |
 | **Amp** | AI model (agent) usage, Orb hours, credits balance | Amp CLI — `~/.local/share/amp/secrets.json` |
 
 Tools you aren't signed in to are simply hidden. Each one can also be turned off in Settings, and dragged into the order you want.
@@ -89,13 +89,13 @@ For every tool, OpenNotch reads the token that tool already keeps on your Mac an
 | ChatGPT | `GET https://chatgpt.com/backend-api/wham/usage` |
 | Cursor | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` and `…/GetSandUsageStatus` (Grok Bot) |
 | Devin | `POST https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus` |
-| Antigravity | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` and `…:loadCodeAssist` (plan) |
+| Antigravity | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` and `…:loadCodeAssist` (plan); after the session expires, the same calls on the running app's loopback server (`…LanguageServerService/RetrieveUserQuotaSummary`, `…/GetLoadCodeAssist`) |
 | Amp | `POST https://ampcode.com/api/internal?userDisplayBalanceInfo` (the call behind `amp usage`) |
 
 **Privacy notes**
 
 - Tokens are never refreshed by OpenNotch. These tools rotate their refresh tokens, so refreshing from a second app could sign you out of the tool itself. If a session expires, OpenNotch keeps the last numbers and asks you to open that tool once.
-- Antigravity's Google access token lasts about an hour and is renewed by Antigravity while the app or `agy` runs; when neither has run for a while, the row shows the last numbers until you open one of them. Its backend only answers Antigravity clients, so these two requests identify as the installed Antigravity app.
+- Antigravity's Google access token lasts about an hour, and Antigravity and `agy` renew it only in memory, so the file is usually expired. OpenNotch then asks the running Antigravity app instead: it reads the per-launch CSRF token from the app's language server command line (`ps`), finds that server's loopback port (`lsof`) and requests the same summary from `127.0.0.1`. When the app isn't open, the row keeps the last numbers. Google's backend only answers Antigravity clients, so the direct requests identify as the installed Antigravity app.
 - The Claude Code Keychain item is read through `/usr/bin/security`, the same tool Claude Code uses to write it, so no extra permission prompt appears.
 - Only usage readings, plan names, session-source labels and refresh status are cached, in `~/Library/Application Support/OpenNotch/usage-cache.json`.
 - These endpoints are undocumented and may change. If a service stops working, please open an issue.

@@ -59,7 +59,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .chatgpt: "Run Codex once to refresh the session."
         case .cursor: "Open Cursor to refresh the session."
         case .devin: "Open Devin to refresh the session."
-        case .antigravity: "Open Antigravity or run `agy` to refresh the session."
+        case .antigravity: "Open the Antigravity app to update its limits."
         case .amp: "Run Amp to refresh the session."
         }
     }
