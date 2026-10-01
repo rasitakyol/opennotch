@@ -106,8 +106,7 @@ struct ProviderRow: View {
     }
 
     private func metricGrid(_ snapshot: ProviderSnapshot) -> some View {
-        // A balance (extra usage, credits…) takes the slot after the limits, like one more column.
-        let cells = snapshot.metrics.map(GridCell.metric) + (snapshot.balance.map { [GridCell.balance($0)] } ?? [])
+        let cells = GridCell.cells(for: snapshot)
         let rows = stride(from: 0, to: cells.count, by: columns).map { Array(cells[$0..<min($0 + columns, cells.count)]) }
 
         return VStack(alignment: .leading, spacing: 10) {
@@ -117,6 +116,8 @@ struct ProviderRow: View {
                         switch cell {
                         case .metric(let metric):
                             MetricCell(provider: provider, metric: metric, now: now)
+                        case .group(let title, let metrics):
+                            MetricGroupCell(provider: provider, title: title, metrics: metrics, now: now)
                         case .balance(let balance):
                             BalanceCell(provider: provider, balance: balance)
                         }
@@ -127,15 +128,35 @@ struct ProviderRow: View {
     }
 }
 
-private enum GridCell: Identifiable {
+enum GridCell: Identifiable {
     case metric(UsageMetric)
+    /// Limits of one shared pool, drawn side by side in a single cell.
+    case group(title: String, metrics: [UsageMetric])
     case balance(UsageBalance)
 
     var id: String {
         switch self {
         case .metric(let metric): metric.id
+        case .group(let title, _): "group.\(title)"
         case .balance: "balance"
         }
+    }
+
+    /// One cell per limit, except that consecutive limits of the same pool share one. A balance (extra
+    /// usage, credits…) takes the slot after the limits, like one more column.
+    static func cells(for snapshot: ProviderSnapshot) -> [GridCell] {
+        var cells: [GridCell] = []
+        for metric in snapshot.metrics {
+            if let group = metric.group, case .group(group, let members) = cells.last {
+                cells[cells.count - 1] = .group(title: group, metrics: members + [metric])
+            } else if let group = metric.group {
+                cells.append(.group(title: group, metrics: [metric]))
+            } else {
+                cells.append(.metric(metric))
+            }
+        }
+        if let balance = snapshot.balance { cells.append(.balance(balance)) }
+        return cells
     }
 }
 
@@ -187,6 +208,69 @@ struct MetricCell: View {
             text += ", resets in \(UsageFormat.spokenDuration(reset.timeIntervalSince(now)))"
         }
         return text
+    }
+}
+
+/// Several limits of one pool (e.g. a 5-hour and a weekly limit) in the frame and rows of `MetricCell`:
+/// the headline is the fullest of them, and the bar slot and caption split into one lane per limit.
+struct MetricGroupCell: View {
+    static let laneGap: CGFloat = 8
+
+    let provider: ProviderID
+    let title: String
+    let metrics: [UsageMetric]
+    let now: Date
+
+    var body: some View {
+        let peak = metrics.map { $0.effectivePercent(now: now) }.max() ?? 0
+
+        VStack(alignment: .leading, spacing: 5) {
+            CellHeader(title: title, value: UsageFormat.percent(peak), color: Palette.forPercent(peak), numericValue: peak)
+            HStack(spacing: Self.laneGap) {
+                ForEach(metrics) { metric in
+                    let percent = metric.effectivePercent(now: now)
+                    UsageBar(fraction: percent / 100, color: Palette.forPercent(percent))
+                }
+            }
+            HStack(spacing: Self.laneGap) {
+                ForEach(metrics) { metric in
+                    HStack(spacing: 3) {
+                        Text(metric.window.title)
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                        Text(UsageFormat.percent(metric.effectivePercent(now: now)))
+                            .monospacedDigit()
+                    }
+                }
+            }
+            .cellCaption()
+        }
+        .frame(width: Layout.metricWidth)
+        .help(tooltip)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(provider.displayName), \(title)")
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var tooltip: String {
+        var lines = [metrics.compactMap(\.detail).first.map { "\(title): \($0)" } ?? title]
+        for metric in metrics {
+            var line = "\(metric.window.title): \(UsageFormat.percent(metric.effectivePercent(now: now))) used"
+            if let reset = metric.resetsAt { line += " · \(UsageFormat.resetSentence(reset, now: now))" }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var accessibilityValue: String {
+        metrics.map { metric in
+            var text = "\(metric.window.title) \(Int(metric.effectivePercent(now: now).rounded())) percent used"
+            if let reset = metric.resetsAt, reset > now {
+                text += ", resets in \(UsageFormat.spokenDuration(reset.timeIntervalSince(now)))"
+            }
+            return text
+        }
+        .joined(separator: "; ")
     }
 }
 
@@ -263,9 +347,10 @@ struct UsageBar: View {
             let clamped = min(max(fraction, 0), 1)
             ZStack(alignment: .leading) {
                 Capsule().fill(Palette.track)
+                // Stays empty while the label still reads "0%".
                 Capsule()
                     .fill(color.gradient)
-                    .frame(width: clamped > 0 ? max(4, proxy.size.width * clamped) : 0)
+                    .frame(width: UsageFormat.wholePercent(clamped * 100) > 0 ? max(4, proxy.size.width * clamped) : 0)
             }
         }
         .frame(height: Self.height)

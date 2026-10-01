@@ -91,6 +91,12 @@ enum DemoData {
             ProviderSnapshot(provider: .devin, plan: "Pro", metrics: [
                 UsageMetric(id: "devin.weekly", title: "Weekly", usedPercent: 91, resetsAt: later(30), window: .weekly),
             ], balance: UsageBalance(title: "Extra usage", amount: 12.5), fetchedAt: now),
+            ProviderSnapshot(provider: .antigravity, plan: "Pro", metrics: [
+                UsageMetric(id: "antigravity.gemini-5h", title: "Gemini 5-hour", usedPercent: 37, resetsAt: later(3.1), window: .fiveHour),
+                UsageMetric(id: "antigravity.gemini-weekly", title: "Gemini weekly", usedPercent: 22, resetsAt: later(5 * 24 + 7), window: .weekly),
+                UsageMetric(id: "antigravity.3p-5h", title: "Other models 5-hour", usedPercent: 64, resetsAt: later(1.4), detail: "Claude Opus, Claude Sonnet, GPT-OSS", window: .fiveHour, group: "Other models"),
+                UsageMetric(id: "antigravity.3p-weekly", title: "Other models weekly", usedPercent: 48, resetsAt: later(5 * 24 + 7), detail: "Claude Opus, Claude Sonnet, GPT-OSS", window: .weekly, group: "Other models"),
+            ], fetchedAt: now),
             ProviderSnapshot(provider: .amp, plan: "Megawatt", metrics: [
                 UsageMetric(id: "amp.agent", title: "AI model", usedPercent: 23, resetsAt: later(22 * 24), detail: "$15.40 / $20 left", window: .monthly),
                 UsageMetric(id: "amp.orb", title: "Orb", usedPercent: 41, resetsAt: later(22 * 24), detail: "443 / 750 h left", window: .monthly),

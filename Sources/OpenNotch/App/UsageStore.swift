@@ -79,9 +79,9 @@ final class UsageStore {
         return store
     }
 
-    /// Enabled providers that have a session on this Mac, in display order.
+    /// Enabled providers that have a session on this Mac, in the order chosen in Settings.
     var visibleProviders: [ProviderID] {
-        ProviderID.allCases.filter { detected.contains($0) && settings.isEnabled($0) }
+        settings.providerOrder.filter { detected.contains($0) && settings.isEnabled($0) }
     }
 
     var critical: CriticalMetric? {

@@ -2,10 +2,13 @@ import Foundation
 
 /// Compact, space-conscious text for the notch.
 public enum UsageFormat {
+    /// Whole percent, so a barely touched limit reads "0%" rather than "<1%".
     public static func percent(_ value: Double) -> String {
-        let clamped = min(max(value, 0), 100)
-        if clamped > 0 && clamped < 1 { return "<1%" }
-        return "\(Int(clamped.rounded()))%"
+        "\(wholePercent(value))%"
+    }
+
+    public static func wholePercent(_ value: Double) -> Int {
+        Int(min(max(value, 0), 100).rounded())
     }
 
     /// Compact duration: "4h 48m", "1d 6h", "22d", "12m".
