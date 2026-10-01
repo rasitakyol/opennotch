@@ -1,19 +1,36 @@
 import Foundation
 
-/// Antigravity model pools (Gemini models; Claude & GPT models), each with a 5-hour and a weekly limit,
-/// read with the Google session that the Antigravity app and the `agy` CLI share.
+/// Antigravity model pools (Gemini models; Claude & GPT models), each with a 5-hour and a weekly limit.
 ///
-/// The access token lives about an hour and is only read here: Antigravity renews it while the app or the
-/// CLI runs, and OpenNotch never touches the refresh token.
+/// The Antigravity app and the `agy` CLI share a Google session file, but its access token lives about an
+/// hour and both renew it only in memory. Once the file has expired, OpenNotch asks the running app's local
+/// server for the same summary instead. Neither path refreshes a token.
 public struct AntigravityProvider: UsageProvider {
     public let id = ProviderID.antigravity
-    private let http: HTTPClient
+    private let requestJSON: @Sendable (URLRequest) async throws -> JSON
+    private let loadCredentials: @Sendable () -> Credentials?
+    private let findApp: @Sendable () async -> RunningApp?
 
     static let api = "https://cloudcode-pa.googleapis.com/v1internal"
+    static let appService = "exa.language_server_pb.LanguageServerService"
     static let otherModels = "Other models"
 
     public init(http: HTTPClient = .shared) {
-        self.http = http
+        self.init(
+            requestJSON: { try await http.json($0) },
+            loadCredentials: { LocalFiles.data(Self.tokenFile).flatMap(Self.parseCredentials) },
+            findApp: { await RunningApp.find() }
+        )
+    }
+
+    init(
+        requestJSON: @escaping @Sendable (URLRequest) async throws -> JSON,
+        loadCredentials: @escaping @Sendable () -> Credentials?,
+        findApp: @escaping @Sendable () async -> RunningApp?
+    ) {
+        self.requestJSON = requestJSON
+        self.loadCredentials = loadCredentials
+        self.findApp = findApp
     }
 
     static var tokenFile: String {
@@ -25,29 +42,70 @@ public struct AntigravityProvider: UsageProvider {
     }
 
     public func fetch() async throws -> ProviderSnapshot {
-        guard let data = LocalFiles.data(Self.tokenFile), let credentials = Self.parseCredentials(data) else {
-            throw ProviderIssue.notConfigured
-        }
+        guard let credentials = loadCredentials() else { throw ProviderIssue.notConfigured }
+        let sessionIssue: ProviderIssue
         if let expiresAt = credentials.expiresAt, expiresAt <= Date().addingTimeInterval(30) {
-            throw ProviderIssue.expired
+            sessionIssue = .expired
+        } else {
+            do {
+                return try await fetchFromGoogle(token: credentials.accessToken)
+            } catch ProviderIssue.unauthorized {
+                sessionIssue = .unauthorized
+            }
         }
+        // Only a stale session switches source; network errors and rate limits are reported as they are.
+        guard let app = await findApp(), let snapshot = await fetchFromApp(app) else { throw sessionIssue }
+        return snapshot
+    }
 
-        async let summaryCall = http.json(request("retrieveUserQuotaSummary", body: "{}", token: credentials.accessToken))
-        async let tierCall = try? http.json(request("loadCodeAssist", body: #"{"metadata":{"ideType":"ANTIGRAVITY"}}"#, token: credentials.accessToken))
+    private func fetchFromGoogle(token: String) async throws -> ProviderSnapshot {
+        async let summaryCall = requestJSON(googleRequest("retrieveUserQuotaSummary", body: "{}", token: token))
+        async let tierCall = try? requestJSON(googleRequest("loadCodeAssist", body: #"{"metadata":{"ideType":"ANTIGRAVITY"}}"#, token: token))
         let metrics = Self.parse(quotaSummary: try await summaryCall)
         let tier = await tierCall
 
         guard !metrics.isEmpty else { throw ProviderIssue.unexpected("No usage limits found") }
-        return ProviderSnapshot(provider: id, plan: tier.flatMap(Self.planName), metrics: metrics)
+        return ProviderSnapshot(provider: id, plan: tier.flatMap(Self.planName), metrics: metrics, credentialSource: "Antigravity session (~/.gemini)")
     }
 
-    private func request(_ method: String, body: String, token: String) -> URLRequest {
+    /// The app's server listens on two loopback ports and only one speaks plain HTTP, so each is tried.
+    private func fetchFromApp(_ app: RunningApp) async -> ProviderSnapshot? {
+        for port in app.ports {
+            // Without forceRefresh the app answers with the reading it took at launch.
+            guard let summary = try? await requestJSON(appRequest("RetrieveUserQuotaSummary", body: #"{"forceRefresh":true}"#, port: port, app: app)) else {
+                continue
+            }
+            let metrics = Self.parse(quotaSummary: summary["response"])
+            guard !metrics.isEmpty else { continue }
+            let tier = try? await requestJSON(appRequest("GetLoadCodeAssist", body: "{}", port: port, app: app))
+            return ProviderSnapshot(
+                provider: id,
+                plan: tier.flatMap { Self.planName($0["response"]) },
+                metrics: metrics,
+                credentialSource: "Running Antigravity app"
+            )
+        }
+        return nil
+    }
+
+    private func googleRequest(_ method: String, body: String, token: String) -> URLRequest {
         var request = URLRequest(url: URL(string: "\(Self.api):\(method)")!)
         request.httpMethod = "POST"
         request.httpBody = Data(body.utf8)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
+    private func appRequest(_ method: String, body: String, port: Int, app: RunningApp) -> URLRequest {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/\(Self.appService)/\(method)")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data(body.utf8)
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+        request.setValue(app.csrfToken, forHTTPHeaderField: "X-Codeium-Csrf-Token")
         return request
     }
 
@@ -71,6 +129,52 @@ public struct AntigravityProvider: UsageProvider {
     static func parseCredentials(_ data: Data) -> Credentials? {
         guard let json = try? JSON(data: data), let token = json["token"]["access_token"].string, !token.isEmpty else { return nil }
         return Credentials(accessToken: token, expiresAt: ISODate.parse(json["token"]["expiry"].string))
+    }
+
+    /// The Antigravity app's local language server: where it listens and the token it expects in each request.
+    struct RunningApp: Sendable, Equatable {
+        let csrfToken: String
+        let ports: [Int]
+
+        static func find() async -> RunningApp? {
+            guard let list = await ProcessRunner.run("/bin/ps", ["-axww", "-o", "pid=,command="]),
+                  let server = languageServer(inProcessList: String(decoding: list.stdout, as: UTF8.self)),
+                  let sockets = await ProcessRunner.run("/usr/sbin/lsof", ["-nP", "-a", "-p", server.pid, "-iTCP", "-sTCP:LISTEN"])
+            else { return nil }
+            let ports = loopbackPorts(lsofOutput: String(decoding: sockets.stdout, as: UTF8.self))
+            return ports.isEmpty ? nil : RunningApp(csrfToken: server.csrfToken, ports: ports)
+        }
+
+        /// The app hands its server a new CSRF token on the command line at every launch.
+        static func languageServer(inProcessList text: String) -> (pid: String, csrfToken: String)? {
+            for line in text.split(whereSeparator: \.isNewline) {
+                guard line.contains("language_server"), line.lowercased().contains("antigravity") else { continue }
+                let fields = line.split(separator: " ")
+                guard let pid = fields.first else { continue }
+                for (index, field) in fields.enumerated() {
+                    if field == "--csrf_token", index + 1 < fields.count {
+                        return (String(pid), String(fields[index + 1]))
+                    }
+                    if field.hasPrefix("--csrf_token=") {
+                        return (String(pid), String(field.dropFirst("--csrf_token=".count)))
+                    }
+                }
+            }
+            return nil
+        }
+
+        /// Ports from `lsof -nP -iTCP -sTCP:LISTEN` lines such as "… TCP 127.0.0.1:63194 (LISTEN)", loopback only.
+        static func loopbackPorts(lsofOutput text: String) -> [Int] {
+            text.split(whereSeparator: \.isNewline).compactMap { line in
+                let fields = line.split(separator: " ")
+                guard fields.last == "(LISTEN)", fields.count >= 2 else { return nil }
+                let address = fields[fields.count - 2]
+                guard address.hasPrefix("127.0.0.1:") || address.hasPrefix("[::1]:"),
+                      let colon = address.lastIndex(of: ":")
+                else { return nil }
+                return Int(address[address.index(after: colon)...])
+            }
+        }
     }
 
     /// Gemini limits get a cell each; every other pool's limits share one cell titled with the pool.
