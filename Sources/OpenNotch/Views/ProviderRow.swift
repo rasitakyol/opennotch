@@ -7,14 +7,33 @@ struct ProviderRow: View {
     let state: ProviderState?
     let columns: Int
     let now: Date
+    var onReviewAccess: (() -> Void)? = nil
     @State private var hovering = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: Layout.columnGap) {
-            identity
-                .frame(width: Layout.providerColumn, alignment: .leading)
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: Layout.columnGap) {
+                identity
+                    .frame(width: Layout.providerColumn, alignment: .leading)
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let issue = state?.issue, state?.snapshot != nil {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("\(issue.title) — \(issue.hint(for: provider))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if provider == .claude, issue == .claudeDesktop(.accessRequired), let onReviewAccess {
+                        Button("Review access", action: onReviewAccess)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.warning)
+                            .fixedSize()
+                    }
+                }
+            }
         }
         .padding(.horizontal, Layout.rowInset)
         .padding(.vertical, 10)
@@ -38,6 +57,7 @@ struct ProviderRow: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Palette.primary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.9)
                     statusBadge
                     if hovering, let url = provider.dashboardURL {
                         Button {
@@ -60,6 +80,14 @@ struct ProviderRow: View {
                         .tracking(0.5)
                         .foregroundStyle(Palette.tertiary)
                         .lineLimit(1)
+                }
+                if let fetched = state?.snapshot?.fetchedAt {
+                    Label(UsageFormat.ago(fetched, now: now), systemImage: "clock")
+                        .font(.system(size: 10))
+                        .foregroundStyle(state?.issue == nil ? Palette.secondary : Palette.warning)
+                        .lineLimit(1)
+                        .accessibilityLabel("Last successful update: \(UsageFormat.ago(fetched, now: now))")
+                        .help("Last successful update: \(UsageFormat.absolute(fetched, now: now)).")
                 }
             }
         }

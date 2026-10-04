@@ -7,9 +7,11 @@ import Foundation
 /// server for the same summary instead. Neither path refreshes a token.
 public struct AntigravityProvider: UsageProvider {
     public let id = ProviderID.antigravity
+    public var keepsCachedReadingWhenUndetected: Bool { true }
     private let requestJSON: @Sendable (URLRequest) async throws -> JSON
     private let loadCredentials: @Sendable () -> Credentials?
-    private let findApp: @Sendable () async -> RunningApp?
+    private let sessionFileExists: @Sendable () -> Bool
+    private let findApp: @Sendable () async -> AppAvailability
 
     static let api = "https://cloudcode-pa.googleapis.com/v1internal"
     static let appService = "exa.language_server_pb.LanguageServerService"
@@ -19,6 +21,7 @@ public struct AntigravityProvider: UsageProvider {
         self.init(
             requestJSON: { try await http.json($0) },
             loadCredentials: { LocalFiles.data(Self.tokenFile).flatMap(Self.parseCredentials) },
+            sessionFileExists: { LocalFiles.exists(Self.tokenFile) },
             findApp: { await RunningApp.find() }
         )
     }
@@ -26,10 +29,12 @@ public struct AntigravityProvider: UsageProvider {
     init(
         requestJSON: @escaping @Sendable (URLRequest) async throws -> JSON,
         loadCredentials: @escaping @Sendable () -> Credentials?,
-        findApp: @escaping @Sendable () async -> RunningApp?
+        sessionFileExists: @escaping @Sendable () -> Bool = { false },
+        findApp: @escaping @Sendable () async -> AppAvailability
     ) {
         self.requestJSON = requestJSON
         self.loadCredentials = loadCredentials
+        self.sessionFileExists = sessionFileExists
         self.findApp = findApp
     }
 
@@ -38,24 +43,38 @@ public struct AntigravityProvider: UsageProvider {
     }
 
     public func detect() async -> Bool {
-        LocalFiles.exists(Self.tokenFile)
+        if sessionFileExists() { return true }
+        if case .running = await findApp() { return true }
+        return false
     }
 
     public func fetch() async throws -> ProviderSnapshot {
-        guard let credentials = loadCredentials() else { throw ProviderIssue.notConfigured }
         let sessionIssue: ProviderIssue
-        if let expiresAt = credentials.expiresAt, expiresAt <= Date().addingTimeInterval(30) {
-            sessionIssue = .expired
-        } else {
-            do {
-                return try await fetchFromGoogle(token: credentials.accessToken)
-            } catch ProviderIssue.unauthorized {
-                sessionIssue = .unauthorized
+        if let credentials = loadCredentials() {
+            if let expiresAt = credentials.expiresAt, expiresAt <= Date().addingTimeInterval(30) {
+                sessionIssue = .expired
+            } else {
+                do {
+                    return try await fetchFromGoogle(token: credentials.accessToken)
+                } catch ProviderIssue.unauthorized {
+                    sessionIssue = .unauthorized
+                }
             }
+        } else {
+            sessionIssue = .notConfigured
         }
-        // Only a stale session switches source; network errors and rate limits are reported as they are.
-        guard let app = await findApp(), let snapshot = await fetchFromApp(app) else { throw sessionIssue }
-        return snapshot
+        // Only a missing or stale session switches source; network errors and rate limits stay as they are.
+        switch await findApp() {
+        case .notRunning:
+            if sessionIssue == .notConfigured && sessionFileExists() {
+                throw ProviderIssue.notConfigured
+            }
+            throw ProviderIssue.appNotRunning
+        case .unavailable:
+            throw ProviderIssue.appUnavailable
+        case .running(let app):
+            return try await fetchFromApp(app)
+        }
     }
 
     private func fetchFromGoogle(token: String) async throws -> ProviderSnapshot {
@@ -69,23 +88,34 @@ public struct AntigravityProvider: UsageProvider {
     }
 
     /// The app's server listens on two loopback ports and only one speaks plain HTTP, so each is tried.
-    private func fetchFromApp(_ app: RunningApp) async -> ProviderSnapshot? {
+    private func fetchFromApp(_ app: RunningApp) async throws -> ProviderSnapshot {
+        var lastIssue = ProviderIssue.appUnavailable
         for port in app.ports {
             // Without forceRefresh the app answers with the reading it took at launch.
-            guard let summary = try? await requestJSON(appRequest("RetrieveUserQuotaSummary", body: #"{"forceRefresh":true}"#, port: port, app: app)) else {
-                continue
+            do {
+                let summary = try await requestJSON(appRequest("RetrieveUserQuotaSummary", body: #"{"forceRefresh":true}"#, port: port, app: app))
+                let metrics = Self.parse(quotaSummary: summary["response"])
+                guard !metrics.isEmpty else {
+                    lastIssue = .unexpected("Antigravity returned no usage limits. Reopen the app and refresh OpenNotch.")
+                    continue
+                }
+                let tier = try? await requestJSON(appRequest("GetLoadCodeAssist", body: "{}", port: port, app: app))
+                return ProviderSnapshot(
+                    provider: id,
+                    plan: tier.flatMap { Self.planName($0["response"]) },
+                    metrics: metrics,
+                    credentialSource: "Running Antigravity app"
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let issue as ProviderIssue {
+                // A TLS-only port can reject HTTP; it must not hide a useful failure from the HTTP port.
+                if issue != .server(status: 400) && issue != .offline { lastIssue = issue }
+            } catch {
+                lastIssue = .appUnavailable
             }
-            let metrics = Self.parse(quotaSummary: summary["response"])
-            guard !metrics.isEmpty else { continue }
-            let tier = try? await requestJSON(appRequest("GetLoadCodeAssist", body: "{}", port: port, app: app))
-            return ProviderSnapshot(
-                provider: id,
-                plan: tier.flatMap { Self.planName($0["response"]) },
-                metrics: metrics,
-                credentialSource: "Running Antigravity app"
-            )
         }
-        return nil
+        throw lastIssue
     }
 
     private func googleRequest(_ method: String, body: String, token: String) -> URLRequest {
@@ -126,6 +156,12 @@ public struct AntigravityProvider: UsageProvider {
         let expiresAt: Date?
     }
 
+    enum AppAvailability: Sendable {
+        case notRunning
+        case unavailable
+        case running(RunningApp)
+    }
+
     static func parseCredentials(_ data: Data) -> Credentials? {
         guard let json = try? JSON(data: data), let token = json["token"]["access_token"].string, !token.isEmpty else { return nil }
         return Credentials(accessToken: token, expiresAt: ISODate.parse(json["token"]["expiry"].string))
@@ -136,21 +172,41 @@ public struct AntigravityProvider: UsageProvider {
         let csrfToken: String
         let ports: [Int]
 
-        static func find() async -> RunningApp? {
-            guard let list = await ProcessRunner.run("/bin/ps", ["-axww", "-o", "pid=,command="]),
-                  let server = languageServer(inProcessList: String(decoding: list.stdout, as: UTF8.self)),
-                  let sockets = await ProcessRunner.run("/usr/sbin/lsof", ["-nP", "-a", "-p", server.pid, "-iTCP", "-sTCP:LISTEN"])
-            else { return nil }
+        static func find() async -> AppAvailability {
+            guard let list = await ProcessRunner.run("/bin/ps", ["-axww", "-o", "pid=,ucomm=,command="]), list.status == 0 else {
+                return .unavailable
+            }
+            let processes = String(decoding: list.stdout, as: UTF8.self)
+            guard let server = languageServer(inProcessList: processes) else {
+                return isAppRunning(inProcessList: processes) ? .unavailable : .notRunning
+            }
+            guard let sockets = await ProcessRunner.run("/usr/sbin/lsof", ["-nP", "-a", "-p", server.pid, "-iTCP", "-sTCP:LISTEN"]), sockets.status == 0 else {
+                return .unavailable
+            }
             let ports = loopbackPorts(lsofOutput: String(decoding: sockets.stdout, as: UTF8.self))
-            return ports.isEmpty ? nil : RunningApp(csrfToken: server.csrfToken, ports: ports)
+            return ports.isEmpty ? .unavailable : .running(RunningApp(csrfToken: server.csrfToken, ports: ports))
+        }
+
+        static func isAppRunning(inProcessList text: String) -> Bool {
+            text.split(whereSeparator: \.isNewline).contains { line in
+                let fields = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
+                guard fields.count == 3 else { return false }
+                // ucomm identifies the executable independently of spaces in its path or arguments.
+                let executable = fields[1].lowercased()
+                let command = fields[2].lowercased()
+                return (executable == "antigravity" && command.contains("/antigravity.app/contents/macos/antigravity"))
+                    || (executable.hasPrefix("language_server") && command.contains("antigravity"))
+            }
         }
 
         /// The app hands its server a new CSRF token on the command line at every launch.
         static func languageServer(inProcessList text: String) -> (pid: String, csrfToken: String)? {
             for line in text.split(whereSeparator: \.isNewline) {
-                guard line.contains("language_server"), line.lowercased().contains("antigravity") else { continue }
-                let fields = line.split(separator: " ")
-                guard let pid = fields.first else { continue }
+                let fields = line.split(whereSeparator: \.isWhitespace)
+                guard fields.count > 2,
+                      fields[1].hasPrefix("language_server"),
+                      line.lowercased().contains("antigravity"),
+                      let pid = fields.first else { continue }
                 for (index, field) in fields.enumerated() {
                     if field == "--csrf_token", index + 1 < fields.count {
                         return (String(pid), String(fields[index + 1]))

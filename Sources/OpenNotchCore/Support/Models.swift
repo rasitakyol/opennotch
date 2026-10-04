@@ -192,6 +192,8 @@ public enum ProviderIssue: Error, Codable, Sendable, Equatable {
     case rateLimited
     case offline
     case timeout
+    case appNotRunning
+    case appUnavailable
     case server(status: Int)
     case unexpected(String)
     case claudeDesktop(ClaudeDesktopIssue)
@@ -204,6 +206,8 @@ public enum ProviderIssue: Error, Codable, Sendable, Equatable {
         case .rateLimited: "Rate limited"
         case .offline: "Offline"
         case .timeout: "Timed out"
+        case .appNotRunning: "App is not running"
+        case .appUnavailable: "App connection unavailable"
         case .server(let status): "Server error (\(status))"
         case .unexpected: "Unexpected response"
         case .claudeDesktop(let issue): issue.title
@@ -217,6 +221,8 @@ public enum ProviderIssue: Error, Codable, Sendable, Equatable {
         case .unauthorized: provider.signInHint
         case .rateLimited, .timeout, .server: "Will retry on the next refresh."
         case .offline: "Will refresh when you're back online."
+        case .appNotRunning: "Open \(provider.displayName), then refresh OpenNotch."
+        case .appUnavailable: "Reopen \(provider.displayName), then refresh OpenNotch."
         case .unexpected(let detail): detail
         case .claudeDesktop(let issue): issue.hint
         }

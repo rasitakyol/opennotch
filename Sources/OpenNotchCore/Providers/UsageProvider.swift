@@ -2,6 +2,8 @@ import Foundation
 
 public protocol UsageProvider: Sendable {
     var id: ProviderID { get }
+    /// Keep showing a cached reading when detection fails, so fetch can explain why (e.g. a closed app).
+    var keepsCachedReadingWhenUndetected: Bool { get }
 
     /// Cheap local check that the tool's credentials exist. Never touches the network.
     func detect() async -> Bool
@@ -9,6 +11,10 @@ public protocol UsageProvider: Sendable {
     /// Reads the local session and asks the tool's own backend for current usage.
     /// Throws `ProviderIssue` for every expected failure.
     func fetch() async throws -> ProviderSnapshot
+}
+
+public extension UsageProvider {
+    var keepsCachedReadingWhenUndetected: Bool { false }
 }
 
 public enum ProviderRegistry {

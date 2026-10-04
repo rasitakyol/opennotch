@@ -24,6 +24,18 @@ enum DocsRenderer {
         settings.collapsedStyle = .all
         write(closed(model), to: directory.appendingPathComponent("notch-closed-all.png"))
 
+        // Recovery previews use invented readings and never invoke the interactive authorization path.
+        settings.claudeDesktopFallbackEnabled = true
+        let staleStore = UsageStore.demo(settings: settings, issues: [
+            .claude: .claudeDesktop(.accessRequired),
+            .antigravity: .appNotRunning,
+        ])
+        write(expanded(NotchViewModel(store: staleStore, settings: settings)), to: directory.appendingPathComponent("notch-stale.png"))
+        writeHosted(SettingsView(settings: settings, store: staleStore).environment(\.colorScheme, .dark), to: directory.appendingPathComponent("claude-recovery.png"))
+        let errors = Dictionary(uniqueKeysWithValues: ProviderID.allCases.map { ($0, ProviderIssue.offline) })
+        let failedStore = UsageStore.demo(settings: settings, issues: errors)
+        write(expanded(NotchViewModel(store: failedStore, settings: settings)), to: directory.appendingPathComponent("notch-all-stale.png"))
+
         defaults.removePersistentDomain(forName: suite)
         print("✓ \(directory.path)")
         exit(0)
@@ -65,6 +77,27 @@ enum DocsRenderer {
             return
         }
         let bitmap = NSBitmapImageRep(cgImage: image)
+        try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
+    }
+
+    /// Form uses AppKit-backed controls that ImageRenderer cannot draw. Host an offscreen window instead.
+    private static func writeHosted(_ view: some View, to url: URL) {
+        let host = NSHostingView(rootView: view)
+        let bounds = NSRect(x: 0, y: 0, width: 480, height: 720)
+        let window = NSWindow(contentRect: bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentView = host
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            print("✗ could not render \(url.lastPathComponent)")
+            return
+        }
+        host.cacheDisplay(in: host.bounds, to: bitmap)
         try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
     }
 }

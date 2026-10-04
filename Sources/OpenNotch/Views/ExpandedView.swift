@@ -22,7 +22,8 @@ struct ExpandedView: View {
                                 provider: provider,
                                 state: store.states[provider],
                                 columns: model.metricColumns,
-                                now: context.date
+                                now: context.date,
+                                onReviewAccess: { model.showSettings() }
                             )
                         }
                     }
@@ -72,8 +73,8 @@ struct ExpandedView: View {
 
     private func statusText(now: Date) -> String {
         if store.isRefreshing { return "· refreshing…" }
-        guard let last = store.lastRefresh else { return "" }
-        return "· \(UsageFormat.ago(last, now: now))"
+        guard let last = store.lastCheck else { return "" }
+        return "· checked \(UsageFormat.ago(last, now: now))"
     }
 
     private var scheduleHelp: String {

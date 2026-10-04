@@ -8,8 +8,10 @@ import SwiftUI
 /// until it leaves the panel, and the panel only captures clicks inside its drawn shape.
 @MainActor
 final class NotchController {
-    /// Fixed canvas the SwiftUI content draws into; big enough for the widest expanded layout plus shadow.
-    private static let canvas = CGSize(width: 760, height: 560)
+    /// Error explanations can make the expanded content taller than the usual drawing area.
+    private var canvasSize: CGSize {
+        CGSize(width: 760, height: max(560, model.expandedSize.height + 24))
+    }
     private static let openDelay: TimeInterval = 0.1
     private static let closeDelay: TimeInterval = 0.28
     /// How far the pointer may stray past the open panel's edge before it counts as having left.
@@ -34,7 +36,7 @@ final class NotchController {
         if pinnedOpen { model.isExpanded = true }
 
         let host = NSHostingView(rootView: NotchRootView(model: model))
-        host.frame = NSRect(origin: .zero, size: Self.canvas)
+        host.frame = NSRect(origin: .zero, size: canvasSize)
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
 
@@ -61,12 +63,13 @@ final class NotchController {
         guard let screen = NotchGeometry.preferredScreen() else { return }
         let geometry = NotchGeometry.resolve(for: screen)
         model.geometry = geometry
+        let canvas = canvasSize
         panel.setFrame(
             NSRect(
-                x: geometry.notchCenterX - Self.canvas.width / 2,
-                y: geometry.top - Self.canvas.height,
-                width: Self.canvas.width,
-                height: Self.canvas.height
+                x: geometry.notchCenterX - canvas.width / 2,
+                y: geometry.top - canvas.height,
+                width: canvas.width,
+                height: canvas.height
             ),
             display: true
         )
@@ -82,12 +85,14 @@ final class NotchController {
 
     private func trackBodyRect() {
         bodyRect = withObservationTracking {
-            computeBodyRect()
+            _ = canvasSize
+            return computeBodyRect()
         } onChange: { [weak self] in
             // Fires before the new value is stored; read it on the next turn of the run loop.
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    if self.panel.frame.size != self.canvasSize { self.reposition() }
                     self.trackBodyRect()
                     self.updateHotZoneFrame()
                 }
