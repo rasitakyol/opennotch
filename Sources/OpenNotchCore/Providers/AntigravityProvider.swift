@@ -173,7 +173,7 @@ public struct AntigravityProvider: UsageProvider {
         let ports: [Int]
 
         static func find() async -> AppAvailability {
-            guard let list = await ProcessRunner.run("/bin/ps", ["-axww", "-o", "pid=,command="]), list.status == 0 else {
+            guard let list = await ProcessRunner.run("/bin/ps", ["-axww", "-o", "pid=,ucomm=,command="]), list.status == 0 else {
                 return .unavailable
             }
             let processes = String(decoding: list.stdout, as: UTF8.self)
@@ -189,21 +189,22 @@ public struct AntigravityProvider: UsageProvider {
 
         static func isAppRunning(inProcessList text: String) -> Bool {
             text.split(whereSeparator: \.isNewline).contains { line in
-                let fields = line.split(separator: " ")
-                guard fields.count > 1 else { return false }
+                let fields = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
+                guard fields.count == 3 else { return false }
+                // ucomm identifies the executable independently of spaces in its path or arguments.
                 let executable = fields[1].lowercased()
-                return executable.hasSuffix("/antigravity.app/contents/macos/antigravity")
-                    || (executable.split(separator: "/").last?.hasPrefix("language_server") == true
-                        && line.lowercased().contains("antigravity"))
+                let command = fields[2].lowercased()
+                return (executable == "antigravity" && command.contains("/antigravity.app/contents/macos/antigravity"))
+                    || (executable.hasPrefix("language_server") && command.contains("antigravity"))
             }
         }
 
         /// The app hands its server a new CSRF token on the command line at every launch.
         static func languageServer(inProcessList text: String) -> (pid: String, csrfToken: String)? {
             for line in text.split(whereSeparator: \.isNewline) {
-                let fields = line.split(separator: " ")
-                guard fields.count > 1,
-                      fields[1].split(separator: "/").last?.hasPrefix("language_server") == true,
+                let fields = line.split(whereSeparator: \.isWhitespace)
+                guard fields.count > 2,
+                      fields[1].hasPrefix("language_server"),
                       line.lowercased().contains("antigravity"),
                       let pid = fields.first else { continue }
                 for (index, field) in fields.enumerated() {

@@ -160,22 +160,33 @@ struct AntigravityFallbackTests {
         }
     }
 
+    @Test func findsTheAppAndServerInPathsWithSpaces() {
+        let processes = """
+          42 Antigravity /Users/Example User/Applications/Antigravity.app/Contents/MacOS/Antigravity
+          43 language_server /Users/Example User/Applications/Antigravity.app/Contents/Resources/bin/language_server --csrf_token fake-csrf --app_data_dir antigravity
+        """
+        #expect(AntigravityProvider.RunningApp.isAppRunning(inProcessList: processes))
+        let server = AntigravityProvider.RunningApp.languageServer(inProcessList: processes)
+        #expect(server?.pid == "43")
+        #expect(server?.csrfToken == "fake-csrf")
+    }
+
     @Test func findsTheAntigravityServerAndItsLoopbackPorts() {
         let processes = """
-          512 /Applications/Devin.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --csrf_token devin-token --ide_name windsurf
-        71334 /Applications/Antigravity.app/Contents/MacOS/Antigravity
-        71763 /Applications/Antigravity.app/Contents/Resources/bin/language_server --standalone --https_server_port 0 --csrf_token fake-csrf --app_data_dir antigravity
+          512 language_server /Applications/Devin.app/Contents/Resources/app/extensions/windsurf/bin/language_server_macos_arm --csrf_token devin-token --ide_name windsurf
+        71334 Antigravity /Applications/Antigravity.app/Contents/MacOS/Antigravity
+        71763 language_server /Applications/Antigravity.app/Contents/Resources/bin/language_server --standalone --https_server_port 0 --csrf_token fake-csrf --app_data_dir antigravity
         """
         let server = AntigravityProvider.RunningApp.languageServer(inProcessList: processes)
         #expect(AntigravityProvider.RunningApp.isAppRunning(inProcessList: processes))
-        #expect(AntigravityProvider.RunningApp.isAppRunning(inProcessList: "42 /Applications/Antigravity.app/Contents/MacOS/Antigravity"))
-        #expect(!AntigravityProvider.RunningApp.isAppRunning(inProcessList: "42 /Applications/Devin.app/Contents/MacOS/Devin"))
-        let shell = "42 /bin/zsh -c ps language_server antigravity --csrf_token fake /Applications/Antigravity.app/Contents/MacOS/Antigravity"
+        #expect(AntigravityProvider.RunningApp.isAppRunning(inProcessList: "42 Antigravity /Applications/Antigravity.app/Contents/MacOS/Antigravity"))
+        #expect(!AntigravityProvider.RunningApp.isAppRunning(inProcessList: "42 Devin /Applications/Devin.app/Contents/MacOS/Devin"))
+        let shell = "42 zsh /bin/zsh -c ps language_server antigravity --csrf_token fake /Applications/Antigravity.app/Contents/MacOS/Antigravity"
         #expect(!AntigravityProvider.RunningApp.isAppRunning(inProcessList: shell))
         #expect(AntigravityProvider.RunningApp.languageServer(inProcessList: shell) == nil)
         #expect(server?.pid == "71763")
         #expect(server?.csrfToken == "fake-csrf")
-        #expect(AntigravityProvider.RunningApp.languageServer(inProcessList: "1 /bin/language_server --csrf_token=x antigravity")?.csrfToken == "x")
+        #expect(AntigravityProvider.RunningApp.languageServer(inProcessList: "1 language_server /bin/language_server --csrf_token=x antigravity")?.csrfToken == "x")
 
         let sockets = """
         COMMAND     PID       USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME

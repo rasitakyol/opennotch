@@ -42,7 +42,8 @@ struct UsageStoreRefreshTests {
         #expect(store.states[.claude]?.issue == nil)
     }
 
-    @Test func undetectedAppProviderKeepsCachedReadingAndReportsFailure() async throws {
+    @Test(arguments: [ProviderIssue.appNotRunning, .appUnavailable])
+    func undetectedAppProviderKeepsCachedReadingAndRecovers(failure: ProviderIssue) async throws {
         let domain = "app.opennotch.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: domain)!
         defer { defaults.removePersistentDomain(forName: domain) }
@@ -56,6 +57,8 @@ struct UsageStoreRefreshTests {
         let antigravitySnapshot = ProviderSnapshot(provider: .antigravity, plan: nil, metrics: [
             UsageMetric(id: "antigravity-five", title: "5-hour", usedPercent: 35, window: .fiveHour),
         ])
+        let reading = OSAllocatedUnfairLock(initialState: antigravitySnapshot)
+        let fetches = OSAllocatedUnfairLock(initialState: 0)
         let chatGPTSnapshot = ProviderSnapshot(provider: .chatgpt, plan: nil, metrics: [
             UsageMetric(id: "chatgpt-five", title: "5-hour", usedPercent: 45, window: .fiveHour),
         ])
@@ -64,14 +67,15 @@ struct UsageStoreRefreshTests {
             detected: { isDetected.withLock { $0 } },
             keepsCached: true
         ) {
-            if shouldFail.withLock({ $0 }) { throw ProviderIssue.appNotRunning }
-            return antigravitySnapshot
+            fetches.withLock { $0 += 1 }
+            if shouldFail.withLock({ $0 }) { throw failure }
+            return reading.withLock { $0 }
         }
         let chatgpt = StubProvider(
             id: .chatgpt,
             detected: { isDetected.withLock { $0 } }
         ) {
-            if shouldFail.withLock({ $0 }) { throw ProviderIssue.appNotRunning }
+            if shouldFail.withLock({ $0 }) { throw failure }
             return chatGPTSnapshot
         }
         let cursor = StubProvider(id: .cursor, detected: { false }, keepsCached: true) {
@@ -100,9 +104,29 @@ struct UsageStoreRefreshTests {
         while store.isRefreshing { await Task.yield() }
         #expect(store.visibleProviders == [.antigravity])
         #expect(store.states[.antigravity]?.snapshot == antigravitySnapshot)
-        #expect(store.states[.antigravity]?.issue == .appNotRunning)
+        #expect(store.states[.antigravity]?.issue == failure)
         #expect(!store.visibleProviders.contains(.chatgpt))
         #expect(!store.visibleProviders.contains(.cursor))
+
+        // An explicit disable still hides a retained reading and stops its fetches.
+        let fetchesBeforeDisable = fetches.withLock { $0 }
+        settings.setEnabled(.antigravity, false)
+        while store.isRefreshing { await Task.yield() }
+        #expect(store.visibleProviders.isEmpty)
+        #expect(store.states[.antigravity]?.snapshot == antigravitySnapshot)
+        #expect(fetches.withLock { $0 } == fetchesBeforeDisable)
+
+        let recovered = ProviderSnapshot(provider: .antigravity, plan: nil, metrics: [
+            UsageMetric(id: "antigravity-five", title: "5-hour", usedPercent: 55, window: .fiveHour),
+        ])
+        reading.withLock { $0 = recovered }
+        isDetected.withLock { $0 = true }
+        shouldFail.withLock { $0 = false }
+        settings.setEnabled(.antigravity, true)
+        while store.isRefreshing { await Task.yield() }
+        #expect(store.visibleProviders.contains(.antigravity))
+        #expect(store.states[.antigravity]?.snapshot == recovered)
+        #expect(store.states[.antigravity]?.issue == nil)
     }
 }
 
