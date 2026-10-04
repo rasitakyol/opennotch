@@ -27,7 +27,7 @@ public enum ClaudeDesktopIssue: String, Error, Codable, Sendable {
         case .noSession, .expired, .rejected:
             "Open Claude Desktop's Code tab and sign in, then refresh OpenNotch."
         case .accessRequired:
-            "In Settings, turn Claude Desktop fallback off and on to allow access. Background refreshes cannot ask for permission."
+            "In Settings → Claude Desktop fallback, click Authorize again… to allow access."
         case .keychainUnavailable:
             "Open Claude Desktop and unlock your login Keychain, then try again."
         case .unsupportedFormat:
@@ -72,7 +72,7 @@ public struct ClaudeDesktopCredentials: Sendable {
     /// Detection checks only the file's existence, never the Keychain or decrypted contents.
     var isPresent: Bool { configExists() }
 
-    /// The only interactive entry point. Call only in response to enabling the Settings toggle.
+    /// The only interactive entry point. Call only from the Settings toggle or Authorize again action.
     public func requestAccessFromSettings() async throws {
         _ = try await read(interaction: .userInitiated)
     }

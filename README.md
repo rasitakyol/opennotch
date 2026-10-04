@@ -63,7 +63,12 @@ make install
 - **↻** refreshes everything now, **⚙** opens Settings.
 - **Right-click** the notch for Refresh Now, Settings and Quit.
 - Hover a row and click **↗** to open that service's own usage page.
-- A **⚠︎** next to a name means the latest refresh failed; the last known numbers stay visible and the tooltip tells you how to fix it.
+- Each row shows when its usage was last successfully updated. A **⚠︎** means the latest check failed: the last known numbers stay visible, with the failure and recovery step below the row. The header's **checked** time records the latest attempt, including failures.
+- **App is not running** for Antigravity means its saved session needs the running app to supply fresh usage. Open Antigravity and refresh. **App connection unavailable** means the local connection could not be read; reopen the app and retry.
+
+<p align="center">
+  <img src="docs/images/notch-stale.png" width="640" alt="Cached usage with last successful update times, Claude Desktop access recovery and Antigravity app status">
+</p>
 
 **Settings:** refresh interval, what the closed notch shows (most critical limit / all services / notch only), open on hover, haptic feedback, launch at login, which services to track, and their order (drag a row to move it).
 
@@ -71,13 +76,25 @@ make install
 
 In **Settings → Claude Desktop fallback**, turn on **Use Claude Desktop when needed**. It is off by default. OpenNotch still tries Claude Code first; it reads Desktop's Code session only if the CLI session is missing, expired or rejected by the usage API. Network errors and rate limits do not switch sessions. A Desktop-only installation is supported after opting in and signing in through Desktop's **Code** tab.
 
-- Enabling the setting is the only action that can ask for the **Claude Safe Storage** Keychain item. **Always Allow** permits later reads without a dialog. Denying access leaves the setting off.
+- Enabling the setting or clicking **Authorize again…** can ask for the **Claude Safe Storage** Keychain item. **Always Allow** permits later reads without a dialog. Denying the initial enable leaves the setting off.
 - This is also the key that protects Desktop's cookies. Although OpenNotch only reads the Code token cache, granting access means trusting it with a key capable of decrypting those other values.
-- Startup, detection, refreshes, wake from sleep and `--probe` never request Desktop Keychain permission. If access is unavailable, they report an error; turn the setting off and on to authorize again. Ad-hoc builds can require permission again after rebuilding.
+- Startup, detection, refreshes, wake from sleep and `--probe` never request Desktop Keychain permission. If access is unavailable, click **Review access** in the Claude row, then **Settings → Claude Desktop fallback → Authorize again…**. Only this explicit action (or enabling the toggle) can show a permission dialog. The integration stays enabled if reauthorization is denied, and the error remains visible. Ad-hoc builds can require permission again after rebuilding.
 - Desktop owns token renewal. OpenNotch reads `~/Library/Application Support/Claude/config.json` (`oauth:tokenCacheV2`) and the Keychain key, decrypts the access token in memory, and sends it only to the usage endpoint below. It never writes Desktop files, reads cookie databases, uses refresh tokens or persists credentials.
 - The format is undocumented and can change. An unreadable cache produces an actionable error; OpenNotch does not try other Desktop storage. Settings and `--probe` show which session supplied the latest reading. The CLI and Desktop may be signed in to different accounts.
 
 The cache format was researched from [Notchlet PR #29](https://github.com/SiebeBaree/Notchlet/pull/29). This fallback supplies the same current usage windows as the CLI; it does not import conversations or a historical usage timeline.
+
+### Signing and Keychain permission across builds
+
+The default build uses an ad-hoc signature whose designated requirement includes the executable's hash. A changed build can therefore need new Claude Desktop Keychain permission even if **Always Allow** was granted before. Reauthorize from Settings on the new build.
+
+If you already have a persistent code-signing identity, use the same identity and bundle identifier for subsequent builds:
+
+```bash
+OPENNOTCH_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" make install
+```
+
+The identity must exist in your Keychain. The build fails if signing with it fails; it does not fall back to ad-hoc signing. Stable signing can preserve Keychain trust, but first-time permission and revoked access still require authorization. The build does not create certificates or change Keychain access rules.
 
 ## How it works
 

@@ -63,6 +63,63 @@ struct ClaudeDesktopSettingsTests {
         #expect(!store.isAuthorizingClaudeDesktop)
     }
 
+    @Test func explicitReauthorizationKeepsOptInAndRefreshesOnlyOnSuccess() async {
+        let (domain, defaults) = defaults()
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let settings = AppSettings(defaults: defaults)
+        settings.claudeDesktopFallbackEnabled = true
+        let denied = OSAllocatedUnfairLock(initialState: true)
+        let authorizations = OSAllocatedUnfairLock(initialState: 0)
+        let store = UsageStore(settings: settings, providers: [:], loadCache: false, requestClaudeDesktopAccess: {
+            authorizations.withLock { $0 += 1 }
+            if denied.withLock({ $0 }) { throw ProviderIssue.claudeDesktop(.accessRequired) }
+        })
+        var fetchChanges = 0
+        settings.onFetchSettingsChange = { fetchChanges += 1 }
+
+        await store.reauthorizeClaudeDesktop()
+        #expect(settings.claudeDesktopFallbackEnabled)
+        #expect(store.claudeDesktopAccessIssue == .claudeDesktop(.accessRequired))
+        #expect(fetchChanges == 0)
+
+        denied.withLock { $0 = false }
+        await store.reauthorizeClaudeDesktop()
+        #expect(store.claudeDesktopAccessIssue == nil)
+        #expect(!store.isAuthorizingClaudeDesktop)
+        #expect(AppSettings(defaults: defaults).claudeDesktopFallbackEnabled)
+        #expect(fetchChanges == 1)
+        #expect(authorizations.withLock { $0 } == 2)
+    }
+
+    @Test func reauthorizationCannotEnableAnOptedOutIntegration() async {
+        let (domain, defaults) = defaults()
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let settings = AppSettings(defaults: defaults)
+        let store = UsageStore(settings: settings, providers: [:], loadCache: false, requestClaudeDesktopAccess: {
+            Issue.record("Reauthorization must not read Keychain before opting in")
+        })
+        await store.reauthorizeClaudeDesktop()
+        #expect(!settings.claudeDesktopFallbackEnabled)
+    }
+
+    @Test func reauthorizationCannotPromptTwiceWhilePending() async {
+        let (domain, defaults) = defaults()
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let settings = AppSettings(defaults: defaults)
+        settings.claudeDesktopFallbackEnabled = true
+        let gate = AuthorizationGate()
+        let store = UsageStore(settings: settings, providers: [:], loadCache: false, requestClaudeDesktopAccess: {
+            await gate.wait()
+        })
+        let authorizing = Task { await store.reauthorizeClaudeDesktop() }
+        while !store.isAuthorizingClaudeDesktop { await Task.yield() }
+        await store.reauthorizeClaudeDesktop()
+        await store.setClaudeDesktopFallbackEnabled(true)
+        await gate.finish()
+        await authorizing.value
+        #expect(await gate.calls == 1)
+    }
+
     @Test func preferenceIsNotEnabledWhileAuthorizationIsPending() async {
         let (domain, defaults) = defaults()
         defer { defaults.removePersistentDomain(forName: domain) }

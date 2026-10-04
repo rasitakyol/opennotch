@@ -47,6 +47,48 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Use Claude Desktop when needed", isOn: Binding(
+                    get: { settings.claudeDesktopFallbackEnabled || store.isAuthorizingClaudeDesktop },
+                    set: { enabled in Task { await store.setClaudeDesktopFallbackEnabled(enabled) } }
+                ))
+                .disabled(store.isAuthorizingClaudeDesktop)
+
+                if settings.claudeDesktopFallbackEnabled {
+                    Button("Authorize again…") {
+                        Task { await store.reauthorizeClaudeDesktop() }
+                    }
+                    .disabled(store.isAuthorizingClaudeDesktop)
+                    .help("Allow OpenNotch to read Claude Desktop's Code session again. This may show a Keychain permission dialog.")
+                }
+
+                if store.isAuthorizingClaudeDesktop {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text("Waiting for Keychain access…").font(.caption)
+                    }
+                }
+                if let issue = claudeDesktopIssue {
+                    let hint = issue == .claudeDesktop(.accessRequired) && !settings.claudeDesktopFallbackEnabled
+                        ? "Turn on Use Claude Desktop when needed to request access again."
+                        : issue.hint(for: .claude)
+                    Text("\(issue.title). \(hint)")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } header: {
+                Text("Claude Desktop fallback")
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Off by default. Uses Desktop's Code session when Claude Code is missing, expired or rejected. OpenNotch only reads it; Desktop renews it.")
+                    Text("Turning this on may ask for the “Claude Safe Storage” Keychain item. “Always Allow” permits future reads. This key also protects Desktop cookies, so grant access only if you trust OpenNotch with that access.")
+                    Text("Background refreshes never ask for permission. After rebuilding OpenNotch, use Authorize again… if access is needed. Choose Always Allow for later reads. Desktop's undocumented format may change.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 ForEach(settings.providerOrder) { provider in
                     ProviderSettingRow(
                         provider: provider,
@@ -88,36 +130,6 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
             }
 
-            Section {
-                Toggle("Use Claude Desktop when needed", isOn: Binding(
-                    get: { settings.claudeDesktopFallbackEnabled || store.isAuthorizingClaudeDesktop },
-                    set: { enabled in Task { await store.setClaudeDesktopFallbackEnabled(enabled) } }
-                ))
-                .disabled(store.isAuthorizingClaudeDesktop)
-
-                if store.isAuthorizingClaudeDesktop {
-                    HStack {
-                        ProgressView().controlSize(.small)
-                        Text("Waiting for Keychain access…").font(.caption)
-                    }
-                }
-                if let issue = store.claudeDesktopAccessIssue {
-                    Text("\(issue.title). \(issue.hint(for: .claude))")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } header: {
-                Text("Claude Desktop fallback")
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Off by default. Uses Desktop's Code session when Claude Code is missing, expired or rejected. OpenNotch only reads it; Desktop renews it.")
-                    Text("Turning this on may ask for the “Claude Safe Storage” Keychain item. “Always Allow” permits future reads. This key also protects Desktop cookies, so grant access only if you trust OpenNotch with that access.")
-                    Text("Background refreshes never ask for permission. After rebuilding OpenNotch, you may need to turn this off and on to allow access again. Desktop's undocumented format may change.")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
 
             Section {
                 HStack {
@@ -138,6 +150,14 @@ struct SettingsView: View {
             launchAtLogin = LaunchAtLogin.isEnabled
             loginNeedsApproval = LaunchAtLogin.needsApproval
         }
+    }
+
+    private var claudeDesktopIssue: ProviderIssue? {
+        if let issue = store.claudeDesktopAccessIssue { return issue }
+        guard settings.claudeDesktopFallbackEnabled,
+              let issue = store.states[.claude]?.issue,
+              case .claudeDesktop = issue else { return nil }
+        return issue
     }
 }
 

@@ -10,7 +10,8 @@ final class UsageStore {
     /// Providers whose credentials exist on this Mac.
     private(set) var detected: Set<ProviderID> = []
     private(set) var isRefreshing = false
-    private(set) var lastRefresh: Date?
+    /// Last completed check, including failures. Successful readings retain their own fetchedAt.
+    private(set) var lastCheck: Date?
     private(set) var nextRefresh: Date?
     private(set) var hasDetected = false
     private(set) var isAuthorizingClaudeDesktop = false
@@ -47,7 +48,7 @@ final class UsageStore {
         if let cache { states = cache.load() }
     }
 
-    /// Called only by the Settings toggle. Loading preferences, detection, probes and refreshes never
+    /// Called only by explicit Settings actions. Loading preferences, detection, probes and refreshes never
     /// use this interactive path. Persist the opt-in only after the user permits a successful read.
     func setClaudeDesktopFallbackEnabled(_ enabled: Bool) async {
         guard !isAuthorizingClaudeDesktop else { return }
@@ -57,6 +58,17 @@ final class UsageStore {
             return
         }
         guard !settings.claudeDesktopFallbackEnabled else { return }
+        await authorizeClaudeDesktop()
+    }
+
+    /// Lets an opted-in user renew Keychain permission after a rebuild without toggling the integration.
+    func reauthorizeClaudeDesktop() async {
+        guard settings.claudeDesktopFallbackEnabled, !isAuthorizingClaudeDesktop else { return }
+        await authorizeClaudeDesktop()
+    }
+
+    private func authorizeClaudeDesktop() async {
+        claudeDesktopAccessIssue = nil
         isAuthorizingClaudeDesktop = true
         defer { isAuthorizingClaudeDesktop = false }
         do {
@@ -70,12 +82,16 @@ final class UsageStore {
     }
 
     /// A store filled with invented numbers, for rendering documentation images.
-    static func demo(settings: AppSettings, now: Date = Date()) -> UsageStore {
+    static func demo(settings: AppSettings, now: Date = Date(), issues: [ProviderID: ProviderIssue] = [:]) -> UsageStore {
         let store = UsageStore(settings: settings, providers: [:], loadCache: false)
         store.states = DemoData.states(now: now)
         store.detected = Set(ProviderID.allCases)
         store.hasDetected = true
-        store.lastRefresh = now.addingTimeInterval(-120)
+        store.lastCheck = now
+        for (provider, issue) in issues {
+            store.states[provider]?.issue = issue
+            store.states[provider]?.snapshot?.fetchedAt = now.addingTimeInterval(-7 * 3_600)
+        }
         return store
     }
 
@@ -130,7 +146,7 @@ final class UsageStore {
                 }
             }
 
-            lastRefresh = Date()
+            lastCheck = Date()
             isRefreshing = false
             cache?.save(states)
             if refreshQueued {
@@ -144,7 +160,7 @@ final class UsageStore {
 
     /// After sleep the timer may be long overdue; catch up immediately in that case.
     func handleWake() {
-        if let lastRefresh, Date().timeIntervalSince(lastRefresh) < settings.refreshInterval {
+        if let lastCheck, Date().timeIntervalSince(lastCheck) < settings.refreshInterval {
             scheduleNext()
         } else {
             refresh()
