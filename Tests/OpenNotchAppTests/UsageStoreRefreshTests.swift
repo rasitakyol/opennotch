@@ -41,13 +41,89 @@ struct UsageStoreRefreshTests {
         #expect(store.states[.claude]?.snapshot == recovered)
         #expect(store.states[.claude]?.issue == nil)
     }
+
+    @Test func undetectedAppProviderKeepsCachedReadingAndReportsFailure() async throws {
+        let domain = "app.opennotch.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let settings = AppSettings(defaults: defaults)
+        settings.setEnabled(.antigravity, true)
+        settings.setEnabled(.chatgpt, true)
+        settings.setEnabled(.cursor, true)
+
+        let isDetected = OSAllocatedUnfairLock(initialState: true)
+        let shouldFail = OSAllocatedUnfairLock(initialState: false)
+        let antigravitySnapshot = ProviderSnapshot(provider: .antigravity, plan: nil, metrics: [
+            UsageMetric(id: "antigravity-five", title: "5-hour", usedPercent: 35, window: .fiveHour),
+        ])
+        let chatGPTSnapshot = ProviderSnapshot(provider: .chatgpt, plan: nil, metrics: [
+            UsageMetric(id: "chatgpt-five", title: "5-hour", usedPercent: 45, window: .fiveHour),
+        ])
+        let antigravity = StubProvider(
+            id: .antigravity,
+            detected: { isDetected.withLock { $0 } },
+            keepsCached: true
+        ) {
+            if shouldFail.withLock({ $0 }) { throw ProviderIssue.appNotRunning }
+            return antigravitySnapshot
+        }
+        let chatgpt = StubProvider(
+            id: .chatgpt,
+            detected: { isDetected.withLock { $0 } }
+        ) {
+            if shouldFail.withLock({ $0 }) { throw ProviderIssue.appNotRunning }
+            return chatGPTSnapshot
+        }
+        let cursor = StubProvider(id: .cursor, detected: { false }, keepsCached: true) {
+            Issue.record("An undetected provider without a cached reading must never be fetched")
+            throw ProviderIssue.notConfigured
+        }
+        let store = UsageStore(
+            settings: settings,
+            providers: [.antigravity: antigravity, .chatgpt: chatgpt, .cursor: cursor],
+            loadCache: false,
+            requestClaudeDesktopAccess: {
+                Issue.record("Refreshes must never request Keychain permission")
+            }
+        )
+
+        store.start()
+        while store.isRefreshing { await Task.yield() }
+        #expect(store.states[.antigravity]?.snapshot == antigravitySnapshot)
+        #expect(store.states[.chatgpt]?.snapshot == chatGPTSnapshot)
+        #expect(store.visibleProviders.contains(.antigravity))
+        #expect(store.visibleProviders.contains(.chatgpt))
+
+        isDetected.withLock { $0 = false }
+        shouldFail.withLock { $0 = true }
+        store.refresh()
+        while store.isRefreshing { await Task.yield() }
+        #expect(store.visibleProviders == [.antigravity])
+        #expect(store.states[.antigravity]?.snapshot == antigravitySnapshot)
+        #expect(store.states[.antigravity]?.issue == .appNotRunning)
+        #expect(!store.visibleProviders.contains(.chatgpt))
+        #expect(!store.visibleProviders.contains(.cursor))
+    }
 }
 
 private struct StubProvider: UsageProvider {
-    let id = ProviderID.claude
+    let id: ProviderID
+    let keepsCachedReadingWhenUndetected: Bool
+    let detected: @Sendable () -> Bool
     let reading: @Sendable () throws -> ProviderSnapshot
 
-    init(reading: @escaping @Sendable () throws -> ProviderSnapshot) { self.reading = reading }
-    func detect() async -> Bool { true }
+    init(
+        id: ProviderID = .claude,
+        detected: @escaping @Sendable () -> Bool = { true },
+        keepsCached: Bool = false,
+        reading: @escaping @Sendable () throws -> ProviderSnapshot
+    ) {
+        self.id = id
+        self.detected = detected
+        keepsCachedReadingWhenUndetected = keepsCached
+        self.reading = reading
+    }
+
+    func detect() async -> Bool { detected() }
     func fetch() async throws -> ProviderSnapshot { try reading() }
 }

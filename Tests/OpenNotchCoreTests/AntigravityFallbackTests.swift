@@ -98,12 +98,22 @@ struct AntigravityFallbackTests {
         #expect(try await provider.fetch().credentialSource == "Running Antigravity app")
     }
 
-    @Test func noSessionAndNoAppRemainsNotConfigured() async {
+    @Test func noSessionAndNoAppIsUndetectedAndReportsClosedApp() async {
         let provider = AntigravityProvider(requestJSON: { _ in
             Issue.record("Unexpected request")
             return try JSON(string: "{}")
         }, loadCredentials: { nil }, findApp: { .notRunning })
         #expect(await !provider.detect())
+        #expect(provider.keepsCachedReadingWhenUndetected)
+        await #expect(throws: ProviderIssue.appNotRunning) { try await provider.fetch() }
+    }
+
+    @Test func unreadableSessionFileWithoutTheAppIsNotConfigured() async {
+        let provider = AntigravityProvider(requestJSON: { _ in
+            Issue.record("Unexpected request")
+            return try JSON(string: "{}")
+        }, loadCredentials: { nil }, sessionFileExists: { true }, findApp: { .notRunning })
+        #expect(await provider.detect())
         await #expect(throws: ProviderIssue.notConfigured) { try await provider.fetch() }
     }
 

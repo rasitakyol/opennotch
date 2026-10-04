@@ -7,6 +7,7 @@ import Foundation
 /// server for the same summary instead. Neither path refreshes a token.
 public struct AntigravityProvider: UsageProvider {
     public let id = ProviderID.antigravity
+    public var keepsCachedReadingWhenUndetected: Bool { true }
     private let requestJSON: @Sendable (URLRequest) async throws -> JSON
     private let loadCredentials: @Sendable () -> Credentials?
     private let sessionFileExists: @Sendable () -> Bool
@@ -65,7 +66,10 @@ public struct AntigravityProvider: UsageProvider {
         // Only a missing or stale session switches source; network errors and rate limits stay as they are.
         switch await findApp() {
         case .notRunning:
-            throw sessionIssue == .notConfigured ? ProviderIssue.notConfigured : .appNotRunning
+            if sessionIssue == .notConfigured && sessionFileExists() {
+                throw ProviderIssue.notConfigured
+            }
+            throw ProviderIssue.appNotRunning
         case .unavailable:
             throw ProviderIssue.appUnavailable
         case .running(let app):

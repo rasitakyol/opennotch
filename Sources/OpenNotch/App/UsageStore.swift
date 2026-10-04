@@ -7,7 +7,7 @@ import os
 @Observable
 final class UsageStore {
     private(set) var states: [ProviderID: ProviderState] = [:]
-    /// Providers whose credentials exist on this Mac.
+    /// Providers whose credentials exist on this Mac, or that keep a cached reading after detection fails.
     private(set) var detected: Set<ProviderID> = []
     private(set) var isRefreshing = false
     /// Last completed check, including failures. Successful readings retain their own fetchedAt.
@@ -170,7 +170,10 @@ final class UsageStore {
     private func detect() async {
         var found: Set<ProviderID> = []
         for (id, provider) in providers {
-            if await provider.detect() { found.insert(id) }
+            let isDetected = await provider.detect()
+            if isDetected || (provider.keepsCachedReadingWhenUndetected && states[id]?.snapshot != nil) {
+                found.insert(id)
+            }
         }
         detected = found
         hasDetected = true
