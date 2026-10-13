@@ -1,10 +1,11 @@
 import Foundation
 
-/// Cursor included usage and Grok Bot, read with the session of the Cursor IDE or the Grok Bot app
-/// (both sign into the same Cursor account).
+/// Cursor included usage, read with the session of the Cursor IDE or the Grok Bot app (both sign into
+/// the same account).
 ///
-/// The included pool follows the subscription from `GetPlanInfo`: some plans reset weekly, others with
-/// the monthly billing cycle. The third-party Other models pool is not shown.
+/// The X Subscription has one weekly pool for Grok, Grok Bot, and Cursor. A separate Grok Bot quota is
+/// shown only when that allowance still comes from a SuperGrok plan that has not moved onto it.
+/// The third-party Other models pool is not shown.
 public struct CursorProvider: UsageProvider {
     public let id = ProviderID.cursor
     private let http: HTTPClient
@@ -69,31 +70,35 @@ public struct CursorProvider: UsageProvider {
         return tokens
     }
 
-    /// `plan` is `GetPlanInfo`. Its included-usage period decides whether the pool is a weekly limit.
+    /// `plan` is `GetPlanInfo`. A weekly included period, or `isUnified` on the Grok Bot status, means
+    /// The X Subscription's single pool.
     public static func parse(usage: JSON, grokBot: JSON?, plan: JSON? = nil) -> [UsageMetric] {
         var metrics: [UsageMetric] = []
         let info = plan.map { $0["planInfo"] }
         let weekly = info.map { Self.isWeekly($0["includedUsagePeriod"]) } ?? false
+        let sharedPool = weekly || grokBot?["isUnified"].bool == true
         let cycleEnd = ISODate.fromUnix(usage["billingCycleEnd"].double)
             ?? info.flatMap { ISODate.fromUnix($0["billingCycleEnd"].double) }
-        let resetsAt = weekly
-            ? (info.flatMap { ISODate.fromUnix($0["includedUsageResetsAt"].double) } ?? cycleEnd)
+        let grokReset = ISODate.parse(grokBot?["nextResetTimestampUtc"].string)
+        let resetsAt = sharedPool
+            ? (info.flatMap { ISODate.fromUnix($0["includedUsageResetsAt"].double) } ?? grokReset ?? cycleEnd)
             : cycleEnd
-        let window: UsageWindow = weekly ? .weekly : .monthly
+        let window: UsageWindow = sharedPool ? .weekly : .monthly
         let pools = usage["planUsage"]
 
-        // A merged plan has one included pool (`totalPercentUsed`). Otherwise the figure is the
-        // Cursor models pool; the third-party pool (`apiPercentUsed`) is left out.
+        // The shared pool is the whole included amount. Otherwise the figure is the Cursor models pool.
+        // The third-party pool (`apiPercentUsed`) is left out in either case.
         let auto = pools["autoPercentUsed"].double
         let total = pools["totalPercentUsed"].double
         let merged = plan?["isMerged"].bool == true
-        let included = merged ? (total ?? auto) : (auto ?? total)
-        let namedPool = !merged && auto != nil
+        let grokPercent = Self.grokBotPercent(grokBot)
+        let included = sharedPool ? (total ?? grokPercent ?? auto) : (merged ? (total ?? auto) : (auto ?? total))
+        let namedPool = !sharedPool && !merged && auto != nil
 
         if let included {
             metrics.append(UsageMetric(
-                id: weekly ? "cursor.weekly" : (namedPool ? "cursor.auto" : "cursor.total"),
-                title: weekly ? "Weekly" : (namedPool ? "Grok & Composer" : "Included usage"),
+                id: sharedPool ? "cursor.weekly" : (namedPool ? "cursor.auto" : "cursor.total"),
+                title: sharedPool ? "Weekly" : (namedPool ? "Grok & Composer" : "Included usage"),
                 usedPercent: included,
                 resetsAt: resetsAt,
                 window: window
@@ -101,8 +106,8 @@ public struct CursorProvider: UsageProvider {
         } else if let limit = pools["limit"].double, limit > 0 {
             let spend = pools["totalSpend"].double ?? 0
             metrics.append(UsageMetric(
-                id: weekly ? "cursor.weekly" : "cursor.total",
-                title: weekly ? "Weekly" : "Included usage",
+                id: sharedPool ? "cursor.weekly" : "cursor.total",
+                title: sharedPool ? "Weekly" : "Included usage",
                 usedPercent: spend / limit * 100,
                 resetsAt: resetsAt,
                 detail: "\(UsageFormat.dollars(spend / 100)) / \(UsageFormat.dollars(limit / 100))",
@@ -110,17 +115,23 @@ public struct CursorProvider: UsageProvider {
             ))
         }
 
-        // proto3 JSON drops `false`, so an absent flag means the plan does include Grok Bot usage.
-        if let grokBot, grokBot["includedLimitZero"].bool != true, let percent = grokBot["usagePercent"].double {
+        // proto3 JSON drops `false`, so an absent flag means this separate allowance includes usage.
+        if !sharedPool, let percent = grokPercent {
             metrics.append(UsageMetric(
                 id: "cursor.grokbot",
                 title: "Grok Bot",
                 usedPercent: percent,
-                resetsAt: ISODate.parse(grokBot["nextResetTimestampUtc"].string),
+                resetsAt: grokReset,
                 window: .weekly
             ))
         }
         return metrics
+    }
+
+    /// Grok Bot's own meter. On The X Subscription this is the same weekly pool, so the caller shows it once.
+    private static func grokBotPercent(_ grokBot: JSON?) -> Double? {
+        guard let grokBot, grokBot["includedLimitZero"].bool != true else { return nil }
+        return grokBot["usagePercent"].double
     }
 
     static func planName(plan: JSON?, grokBot: JSON?, membership: String?) -> String? {
