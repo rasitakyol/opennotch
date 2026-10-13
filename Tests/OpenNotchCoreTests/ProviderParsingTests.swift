@@ -86,13 +86,37 @@ struct CursorParsingTests {
      "grokPlanLabel": "Grok Bot Plan", "cursorPlanName": "Ultra"}
     """
 
-    @Test func readsBothPoolsAndGrokBot() throws {
+    @Test func readsCursorModelsAndGrokBot() throws {
         let metrics = CursorProvider.parse(usage: try JSON(string: usage), grokBot: try JSON(string: grokBot))
-        #expect(metrics.map(\.title) == ["Grok & Composer", "Other models", "Grok Bot"])
+        #expect(metrics.map(\.title) == ["Grok & Composer", "Grok Bot"])
+        #expect(metrics.map(\.id) == ["cursor.auto", "cursor.grokbot"])
         #expect(Int(metrics[0].usedPercent.rounded()) == 10)
-        #expect(Int(metrics[1].usedPercent.rounded()) == 25)
+        #expect(metrics[0].window == .monthly)
         #expect(metrics[0].resetsAt == Date(timeIntervalSince1970: 1_791_908_766))
-        #expect(metrics[2].resetsAt == ISODate.parse("2026-09-30T05:04:00.623Z"))
+        #expect(metrics[1].resetsAt == ISODate.parse("2026-09-30T05:04:00.623Z"))
+    }
+
+    @Test func weeklySubscriptionUsesTheIncludedReset() throws {
+        let plan = """
+        {"isMerged": true, "planInfo": {"planName": "Pro",
+          "includedUsagePeriod": "INCLUDED_USAGE_PERIOD_WEEKLY", "includedUsageResetsAt": "1790500000000"}}
+        """
+        let parsed = try JSON(string: plan)
+        let metrics = CursorProvider.parse(usage: try JSON(string: usage), grokBot: try JSON(string: grokBot), plan: parsed)
+        #expect(metrics.map(\.title) == ["Weekly", "Grok Bot"])
+        #expect(metrics[0].id == "cursor.weekly")
+        #expect(metrics[0].window == .weekly)
+        #expect(metrics[0].usedPercent == 11.55)
+        #expect(metrics[0].resetsAt == Date(timeIntervalSince1970: 1_790_500_000))
+        #expect(CursorProvider.planName(plan: parsed, grokBot: nil, membership: "ultra") == "Pro")
+    }
+
+    @Test func numericWeeklyPeriodUsesTheCursorModelsPool() throws {
+        let plan = #"{"planInfo": {"includedUsagePeriod": 2, "includedUsageResetsAt": 1790500000000}}"#
+        let metrics = CursorProvider.parse(usage: try JSON(string: usage), grokBot: nil, plan: try JSON(string: plan))
+        #expect(metrics.map(\.title) == ["Weekly"])
+        #expect(metrics[0].usedPercent == 10.427666666666667)
+        #expect(metrics[0].resetsAt == Date(timeIntervalSince1970: 1_790_500_000))
     }
 
     @Test func grokBotWithoutIncludedLimitIsHidden() throws {

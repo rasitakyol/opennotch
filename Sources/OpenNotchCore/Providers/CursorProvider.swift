@@ -1,7 +1,10 @@
 import Foundation
 
-/// Cursor plan pools (Cursor models = Cursor Grok & Composer, other models) and Grok Bot, read with the
-/// session of the Cursor IDE or the Grok Bot app (both sign into the same Cursor account).
+/// Cursor included usage and Grok Bot, read with the session of the Cursor IDE or the Grok Bot app
+/// (both sign into the same Cursor account).
+///
+/// The included pool follows the subscription from `GetPlanInfo`: some plans reset weekly, others with
+/// the monthly billing cycle. The third-party Other models pool is not shown.
 public struct CursorProvider: UsageProvider {
     public let id = ProviderID.cursor
     private let http: HTTPClient
@@ -35,15 +38,16 @@ public struct CursorProvider: UsageProvider {
         else { throw ProviderIssue.expired }
 
         async let usageCall = http.connect(Self.api.appendingPathComponent("GetCurrentPeriodUsage"), bearer: token)
+        async let planCall = try? http.connect(Self.api.appendingPathComponent("GetPlanInfo"), bearer: token)
         async let grokBotCall = try? http.connect(Self.api.appendingPathComponent("GetSandUsageStatus"), bearer: token)
         let usage = try await usageCall
+        let plan = await planCall
         let grokBot = await grokBotCall
 
-        let metrics = Self.parse(usage: usage, grokBot: grokBot)
+        let metrics = Self.parse(usage: usage, grokBot: grokBot, plan: plan)
         guard !metrics.isEmpty else { throw ProviderIssue.unexpected("No usage data found") }
-        let plan = grokBot?["cursorPlanName"].string
-            ?? SQLiteKV.value(forKey: "cursorAuth/stripeMembershipType", databaseAt: Self.ideDatabase)?.capitalized
-        return ProviderSnapshot(provider: id, plan: plan, metrics: metrics)
+        let membership = SQLiteKV.value(forKey: "cursorAuth/stripeMembershipType", databaseAt: Self.ideDatabase)
+        return ProviderSnapshot(provider: id, plan: Self.planName(plan: plan, grokBot: grokBot, membership: membership), metrics: metrics)
     }
 
     static func localTokens() -> [String] {
@@ -65,31 +69,45 @@ public struct CursorProvider: UsageProvider {
         return tokens
     }
 
-    public static func parse(usage: JSON, grokBot: JSON?) -> [UsageMetric] {
+    /// `plan` is `GetPlanInfo`. Its included-usage period decides whether the pool is a weekly limit.
+    public static func parse(usage: JSON, grokBot: JSON?, plan: JSON? = nil) -> [UsageMetric] {
         var metrics: [UsageMetric] = []
+        let info = plan.map { $0["planInfo"] }
+        let weekly = info.map { Self.isWeekly($0["includedUsagePeriod"]) } ?? false
         let cycleEnd = ISODate.fromUnix(usage["billingCycleEnd"].double)
-        let plan = usage["planUsage"]
+            ?? info.flatMap { ISODate.fromUnix($0["billingCycleEnd"].double) }
+        let resetsAt = weekly
+            ? (info.flatMap { ISODate.fromUnix($0["includedUsageResetsAt"].double) } ?? cycleEnd)
+            : cycleEnd
+        let window: UsageWindow = weekly ? .weekly : .monthly
+        let pools = usage["planUsage"]
 
-        if let auto = plan["autoPercentUsed"].double {
-            metrics.append(UsageMetric(id: "cursor.auto", title: "Grok & Composer", usedPercent: auto, resetsAt: cycleEnd, window: .monthly))
-        }
-        if let api = plan["apiPercentUsed"].double {
-            metrics.append(UsageMetric(id: "cursor.api", title: "Other models", usedPercent: api, resetsAt: cycleEnd, window: .monthly))
-        }
-        if metrics.isEmpty {
-            if let total = plan["totalPercentUsed"].double {
-                metrics.append(UsageMetric(id: "cursor.total", title: "Included usage", usedPercent: total, resetsAt: cycleEnd, window: .monthly))
-            } else if let limit = plan["limit"].double, limit > 0 {
-                let spend = plan["totalSpend"].double ?? 0
-                metrics.append(UsageMetric(
-                    id: "cursor.total",
-                    title: "Included usage",
-                    usedPercent: spend / limit * 100,
-                    resetsAt: cycleEnd,
-                    detail: "\(UsageFormat.dollars(spend / 100)) / \(UsageFormat.dollars(limit / 100))",
-                    window: .monthly
-                ))
-            }
+        // A merged plan has one included pool (`totalPercentUsed`). Otherwise the figure is the
+        // Cursor models pool; the third-party pool (`apiPercentUsed`) is left out.
+        let auto = pools["autoPercentUsed"].double
+        let total = pools["totalPercentUsed"].double
+        let merged = plan?["isMerged"].bool == true
+        let included = merged ? (total ?? auto) : (auto ?? total)
+        let namedPool = !merged && auto != nil
+
+        if let included {
+            metrics.append(UsageMetric(
+                id: weekly ? "cursor.weekly" : (namedPool ? "cursor.auto" : "cursor.total"),
+                title: weekly ? "Weekly" : (namedPool ? "Grok & Composer" : "Included usage"),
+                usedPercent: included,
+                resetsAt: resetsAt,
+                window: window
+            ))
+        } else if let limit = pools["limit"].double, limit > 0 {
+            let spend = pools["totalSpend"].double ?? 0
+            metrics.append(UsageMetric(
+                id: weekly ? "cursor.weekly" : "cursor.total",
+                title: weekly ? "Weekly" : "Included usage",
+                usedPercent: spend / limit * 100,
+                resetsAt: resetsAt,
+                detail: "\(UsageFormat.dollars(spend / 100)) / \(UsageFormat.dollars(limit / 100))",
+                window: window
+            ))
         }
 
         // proto3 JSON drops `false`, so an absent flag means the plan does include Grok Bot usage.
@@ -103,5 +121,18 @@ public struct CursorProvider: UsageProvider {
             ))
         }
         return metrics
+    }
+
+    static func planName(plan: JSON?, grokBot: JSON?, membership: String?) -> String? {
+        if let name = plan?["planInfo"]["planName"].string, !name.isEmpty { return name }
+        if let name = grokBot?["cursorPlanName"].string, !name.isEmpty { return name }
+        guard let membership, !membership.isEmpty else { return nil }
+        return membership.capitalized
+    }
+
+    /// Connect JSON sends the proto enum as a name (`INCLUDED_USAGE_PERIOD_WEEKLY`) or as its number (`2`).
+    private static func isWeekly(_ value: JSON) -> Bool {
+        if value.string?.lowercased().contains("weekly") == true { return true }
+        return value.double == 2
     }
 }

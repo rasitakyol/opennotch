@@ -38,7 +38,7 @@ If you use several AI coding tools, their limits live in six different places: a
 | --- | --- | --- |
 | **Claude** | 5-hour, Weekly, Weekly per model (e.g. Fable) | Claude Code — macOS Keychain item `Claude Code-credentials` (or `~/.claude/.credentials.json`); optional Claude Desktop fallback |
 | **ChatGPT** | Codex limits of your plan (5-hour and/or Weekly) | Codex CLI — `~/.codex/auth.json` |
-| **Cursor** | Grok & Composer pool, Other models pool, Grok Bot | Cursor app (`state.vscdb`) or the Grok Bot app |
+| **Cursor** | Included usage (Weekly when the plan resets weekly, otherwise Grok & Composer) and Grok Bot | Cursor app (`state.vscdb`) or the Grok Bot app |
 | **Devin** | Weekly quota (plus Daily when your plan shows it), extra usage balance | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
 | **Antigravity** | Gemini models 5-hour and Weekly; Other models (Claude, GPT-OSS) 5-hour and Weekly, shared in one cell | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running Antigravity app |
 | **Amp** | AI model (agent) usage, Orb hours, credits balance | Amp CLI — `~/.local/share/amp/secrets.json` |
@@ -104,7 +104,7 @@ For every tool, OpenNotch reads the token that tool already keeps on your Mac an
 | --- | --- |
 | Claude | `GET https://api.anthropic.com/api/oauth/usage` |
 | ChatGPT | `GET https://chatgpt.com/backend-api/wham/usage` |
-| Cursor | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` and `…/GetSandUsageStatus` (Grok Bot) |
+| Cursor | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`, `…/GetPlanInfo` (weekly or monthly included usage) and `…/GetSandUsageStatus` (Grok Bot) |
 | Devin | `POST https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus` |
 | Antigravity | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` and `…:loadCodeAssist` (plan); after the session expires, the same calls on the running app's loopback server (`…LanguageServerService/RetrieveUserQuotaSummary`, `…/GetLoadCodeAssist`) |
 | Amp | `POST https://ampcode.com/api/internal?userDisplayBalanceInfo` (the call behind `amp usage`) |

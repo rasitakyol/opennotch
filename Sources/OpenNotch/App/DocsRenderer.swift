@@ -117,8 +117,7 @@ enum DemoData {
                 UsageMetric(id: "chatgpt.weekly", title: "Weekly", usedPercent: 35, resetsAt: later(98), window: .weekly),
             ], fetchedAt: now),
             ProviderSnapshot(provider: .cursor, plan: "Pro", metrics: [
-                UsageMetric(id: "cursor.auto", title: "Grok & Composer", usedPercent: 24, resetsAt: later(19 * 24), window: .monthly),
-                UsageMetric(id: "cursor.api", title: "Other models", usedPercent: 79, resetsAt: later(19 * 24), window: .monthly),
+                UsageMetric(id: "cursor.weekly", title: "Weekly", usedPercent: 79, resetsAt: later(4 * 24 + 5), window: .weekly),
                 UsageMetric(id: "cursor.grokbot", title: "Grok Bot", usedPercent: 12, resetsAt: later(4 * 24 + 5), window: .weekly),
             ], fetchedAt: now),
             ProviderSnapshot(provider: .devin, plan: "Pro", metrics: [
