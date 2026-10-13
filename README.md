@@ -38,7 +38,7 @@ If you use several AI coding tools, their limits live in six different places: a
 | --- | --- | --- |
 | **Claude** | 5-hour, Weekly, Weekly per model (e.g. Fable) | Claude Code — macOS Keychain item `Claude Code-credentials` (or `~/.claude/.credentials.json`); optional Claude Desktop fallback |
 | **ChatGPT** | Codex limits of your plan (5-hour and/or Weekly) | Codex CLI — `~/.codex/auth.json` |
-| **Cursor** | Included usage (Weekly when the plan resets weekly, otherwise Grok & Composer) and Grok Bot | Cursor app (`state.vscdb`) or the Grok Bot app |
+| **Cursor** | One Weekly pool on The X Subscription. Older plans show Grok & Composer, plus Grok Bot when that allowance is still separate | Cursor app (`state.vscdb`) or the Grok Bot app |
 | **Devin** | Weekly quota (plus Daily when your plan shows it), extra usage balance | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
 | **Antigravity** | Gemini models 5-hour and Weekly; Other models (Claude, GPT-OSS) 5-hour and Weekly, shared in one cell | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running Antigravity app |
 | **Amp** | AI model (agent) usage, Orb hours, credits balance | Amp CLI — `~/.local/share/amp/secrets.json` |

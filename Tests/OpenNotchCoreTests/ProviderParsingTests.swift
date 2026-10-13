@@ -103,19 +103,30 @@ struct CursorParsingTests {
         """
         let parsed = try JSON(string: plan)
         let metrics = CursorProvider.parse(usage: try JSON(string: usage), grokBot: try JSON(string: grokBot), plan: parsed)
-        #expect(metrics.map(\.title) == ["Weekly", "Grok Bot"])
-        #expect(metrics[0].id == "cursor.weekly")
+        #expect(metrics.map(\.title) == ["Weekly"])
+        #expect(metrics.map(\.id) == ["cursor.weekly"])
         #expect(metrics[0].window == .weekly)
         #expect(metrics[0].usedPercent == 11.55)
         #expect(metrics[0].resetsAt == Date(timeIntervalSince1970: 1_790_500_000))
         #expect(CursorProvider.planName(plan: parsed, grokBot: nil, membership: "ultra") == "Pro")
     }
 
-    @Test func numericWeeklyPeriodUsesTheCursorModelsPool() throws {
+    @Test func unifiedFlagUsesTheSharedPoolWithoutASecondQuota() throws {
+        let sand = """
+        {"isUnified": true, "usagePercent": 40, "nextResetTimestampUtc": "2026-09-30T05:04:00.623Z",
+         "hasNonZeroIncludedLimit": true}
+        """
+        let metrics = CursorProvider.parse(usage: try JSON(string: usage), grokBot: try JSON(string: sand), plan: nil)
+        #expect(metrics.map(\.title) == ["Weekly"])
+        #expect(metrics[0].usedPercent == 11.55)
+        #expect(metrics[0].resetsAt == ISODate.parse("2026-09-30T05:04:00.623Z"))
+    }
+
+    @Test func numericWeeklyPeriodUsesTheSharedIncludedPool() throws {
         let plan = #"{"planInfo": {"includedUsagePeriod": 2, "includedUsageResetsAt": 1790500000000}}"#
         let metrics = CursorProvider.parse(usage: try JSON(string: usage), grokBot: nil, plan: try JSON(string: plan))
         #expect(metrics.map(\.title) == ["Weekly"])
-        #expect(metrics[0].usedPercent == 10.427666666666667)
+        #expect(metrics[0].usedPercent == 11.55)
         #expect(metrics[0].resetsAt == Date(timeIntervalSince1970: 1_790_500_000))
     }
 
