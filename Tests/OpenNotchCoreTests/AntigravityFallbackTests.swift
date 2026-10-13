@@ -196,4 +196,46 @@ struct AntigravityFallbackTests {
         """
         #expect(AntigravityProvider.RunningApp.loopbackPorts(lsofOutput: sockets) == [63193, 63194])
     }
+
+    @Test func findsGeminiAppEmbeddedAgyHubAndExtractsCSRFToken() async throws {
+        let processes = """
+         5265 Gemini           /Applications/Gemini.app/Contents/MacOS/Gemini
+         5764 agy              /Applications/Gemini.app/Contents/Helpers/agy --hub --hub-port=61424 --use_host_auth --host_bridge_url=http://127.0.0.1:57542 --read_host_bridge_token_from_stdin --app_data_dir=antigravity --add-dir=/Users/rasitakyol
+         9999 agy              /Applications/Gemini.app/Contents/Helpers/agy agentapi subagent
+        """
+        #expect(AntigravityProvider.RunningApp.isAppRunning(inProcessList: processes))
+        let servers = AntigravityProvider.RunningApp.servers(inProcessList: processes)
+        #expect(servers.count == 1)
+        let server = try #require(servers.first)
+        #expect(server.pid == "5764")
+        #expect(server.csrfToken == nil)
+        #expect(server.ports == [61424])
+        #expect(server.credentialSource == "Running Gemini app")
+
+        let html = """
+        <!doctype html>
+        <html lang="en">
+          <head>
+        <script>window.__APP_CONFIG__ = {"productName":"antigravity","csrfToken":"a6cc4ed0-f588-47a4-b135-f2cc90f61f47","appVersion":"","devMode":false};</script>
+          </head>
+        </html>
+        """
+        let token = AntigravityProvider.RunningApp.csrfToken(inHTML: html)
+        #expect(token == "a6cc4ed0-f588-47a4-b135-f2cc90f61f47")
+
+        let geminiApp = AntigravityProvider.RunningApp(
+            csrfToken: try #require(token),
+            ports: server.ports,
+            credentialSource: server.credentialSource
+        )
+        let body = summary
+        let provider = AntigravityProvider(requestJSON: { request in
+            #expect(request.url?.port == 61424)
+            #expect(request.value(forHTTPHeaderField: "X-Codeium-Csrf-Token") == "a6cc4ed0-f588-47a4-b135-f2cc90f61f47")
+            return try JSON(string: #"{"response": \#(body)}"#)
+        }, loadCredentials: { nil }, findApp: { .running(geminiApp) })
+        let snapshot = try await provider.fetch()
+        #expect(snapshot.metrics.map(\.usedPercent) == [25])
+        #expect(snapshot.credentialSource == "Running Gemini app")
+    }
 }

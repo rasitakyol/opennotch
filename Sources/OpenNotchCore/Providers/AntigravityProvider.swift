@@ -104,7 +104,7 @@ public struct AntigravityProvider: UsageProvider {
                     provider: id,
                     plan: tier.flatMap { Self.planName($0["response"]) },
                     metrics: metrics,
-                    credentialSource: "Running Antigravity app"
+                    credentialSource: app.credentialSource
                 )
             } catch is CancellationError {
                 throw CancellationError()
@@ -167,28 +167,70 @@ public struct AntigravityProvider: UsageProvider {
         return Credentials(accessToken: token, expiresAt: ISODate.parse(json["token"]["expiry"].string))
     }
 
-    /// The Antigravity app's local language server: where it listens and the token it expects in each request.
+    /// The local language server (inside Antigravity.app or Gemini.app's embedded `agy --hub`):
+    /// where it listens and the CSRF token it expects in each request.
     struct RunningApp: Sendable, Equatable {
+        struct Server: Sendable, Equatable {
+            let pid: String
+            let csrfToken: String?
+            let ports: [Int]
+            let credentialSource: String
+        }
+
         let csrfToken: String
         let ports: [Int]
+        var credentialSource: String = "Running Antigravity app"
 
-        static func find() async -> AppAvailability {
+        static func find(
+            loadHTML: @Sendable (URL) async -> Data? = Self.fetchHTML
+        ) async -> AppAvailability {
             guard let list = await ProcessRunner.run("/bin/ps", ["-axww", "-o", "pid=,ucomm=,command="]), list.status == 0 else {
                 return .unavailable
             }
             let processes = String(decoding: list.stdout, as: UTF8.self)
-            guard let server = languageServer(inProcessList: processes) else {
+            let candidates = servers(inProcessList: processes)
+            guard !candidates.isEmpty else {
                 return isAppRunning(inProcessList: processes) ? .unavailable : .notRunning
             }
-            guard let sockets = await ProcessRunner.run("/usr/sbin/lsof", ["-nP", "-a", "-p", server.pid, "-iTCP", "-sTCP:LISTEN"]), sockets.status == 0 else {
-                return .unavailable
+            for server in candidates {
+                let ports: [Int]
+                if !server.ports.isEmpty {
+                    ports = server.ports
+                } else {
+                    guard let sockets = await ProcessRunner.run("/usr/sbin/lsof", ["-nP", "-a", "-p", server.pid, "-iTCP", "-sTCP:LISTEN"]),
+                          sockets.status == 0
+                    else { continue }
+                    ports = loopbackPorts(lsofOutput: String(decoding: sockets.stdout, as: UTF8.self))
+                }
+                guard !ports.isEmpty else { continue }
+
+                if let token = server.csrfToken {
+                    return .running(RunningApp(csrfToken: token, ports: ports, credentialSource: server.credentialSource))
+                }
+                for port in ports {
+                    guard let url = URL(string: "http://127.0.0.1:\(port)/"),
+                          let data = await loadHTML(url),
+                          let token = csrfToken(inHTML: String(decoding: data, as: UTF8.self))
+                    else { continue }
+                    return .running(RunningApp(csrfToken: token, ports: [port], credentialSource: server.credentialSource))
+                }
             }
-            let ports = loopbackPorts(lsofOutput: String(decoding: sockets.stdout, as: UTF8.self))
-            return ports.isEmpty ? .unavailable : .running(RunningApp(csrfToken: server.csrfToken, ports: ports))
+            return .unavailable
+        }
+
+        private static func fetchHTML(_ url: URL) async -> Data? {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            guard let (data, response) = try? await URLSession.shared.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200
+            else { return nil }
+            return data
         }
 
         static func isAppRunning(inProcessList text: String) -> Bool {
-            text.split(whereSeparator: \.isNewline).contains { line in
+            if !servers(inProcessList: text).isEmpty { return true }
+            return text.split(whereSeparator: \.isNewline).contains { line in
                 let fields = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
                 guard fields.count == 3 else { return false }
                 // ucomm identifies the executable independently of spaces in its path or arguments.
@@ -199,24 +241,73 @@ public struct AntigravityProvider: UsageProvider {
             }
         }
 
-        /// The app hands its server a new CSRF token on the command line at every launch.
-        static func languageServer(inProcessList text: String) -> (pid: String, csrfToken: String)? {
+        static func languageServer(inProcessList text: String) -> Server? {
+            servers(inProcessList: text).first
+        }
+
+        /// Finds Antigravity's standalone `language_server` (which receives `--csrf_token` on the command line)
+        /// or Gemini.app's embedded `agy --hub` server (which exposes `--hub-port` and embeds its CSRF token in `GET /`).
+        static func servers(inProcessList text: String) -> [Server] {
+            var result: [Server] = []
             for line in text.split(whereSeparator: \.isNewline) {
                 let fields = line.split(whereSeparator: \.isWhitespace)
-                guard fields.count > 2,
-                      fields[1].hasPrefix("language_server"),
-                      line.lowercased().contains("antigravity"),
-                      let pid = fields.first else { continue }
-                for (index, field) in fields.enumerated() {
-                    if field == "--csrf_token", index + 1 < fields.count {
-                        return (String(pid), String(fields[index + 1]))
-                    }
-                    if field.hasPrefix("--csrf_token=") {
-                        return (String(pid), String(field.dropFirst("--csrf_token=".count)))
-                    }
+                guard fields.count > 2, let pid = fields.first else { continue }
+                let executable = fields[1].lowercased()
+                let lowerLine = line.lowercased()
+
+                if executable.hasPrefix("language_server"),
+                   lowerLine.contains("antigravity"),
+                   let token = flagValue("--csrf_token", in: fields),
+                   !token.isEmpty
+                {
+                    result.append(Server(
+                        pid: String(pid),
+                        csrfToken: token,
+                        ports: [],
+                        credentialSource: "Running Antigravity app"
+                    ))
+                } else if executable == "agy",
+                          fields.contains(where: { $0 == "--hub" || $0.hasPrefix("--hub-port") })
+                {
+                    let token = flagValue("--csrf_token", in: fields).flatMap { $0.isEmpty ? nil : $0 }
+                    let hubPort = flagValue("--hub-port", in: fields).flatMap(Int.init).flatMap { $0 > 0 ? $0 : nil }
+                    let source = (lowerLine.contains("/gemini.app/") || fields.contains("--use_host_auth"))
+                        ? "Running Gemini app"
+                        : "Running Antigravity app"
+                    result.append(Server(
+                        pid: String(pid),
+                        csrfToken: token,
+                        ports: hubPort.map { [$0] } ?? [],
+                        credentialSource: source
+                    ))
+                }
+            }
+            return result
+        }
+
+        private static func flagValue(_ name: String, in fields: [Substring]) -> String? {
+            let prefix = "\(name)="
+            for (index, field) in fields.enumerated() {
+                if field == name, index + 1 < fields.count {
+                    return String(fields[index + 1])
+                }
+                if field.hasPrefix(prefix) {
+                    return String(field.dropFirst(prefix.count))
                 }
             }
             return nil
+        }
+
+        /// `agy --hub` serves its generated CSRF token in `<script>window.__APP_CONFIG__ = {...};</script>`.
+        static func csrfToken(inHTML text: String) -> String? {
+            guard let marker = text.range(of: "window.__APP_CONFIG__"),
+                  let start = text[marker.upperBound...].firstIndex(of: "{"),
+                  let end = text[start...].range(of: "};")?.lowerBound,
+                  let json = try? JSON(string: String(text[start...end])),
+                  let token = json["csrfToken"].string,
+                  !token.isEmpty
+            else { return nil }
+            return token
         }
 
         /// Ports from `lsof -nP -iTCP -sTCP:LISTEN` lines such as "… TCP 127.0.0.1:63194 (LISTEN)", loopback only.
