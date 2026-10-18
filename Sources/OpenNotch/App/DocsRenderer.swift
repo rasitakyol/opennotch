@@ -128,6 +128,10 @@ enum DemoData {
                 UsageMetric(id: "antigravity.3p-5h", title: "Other models 5-hour", usedPercent: 64, resetsAt: later(1.4), detail: "Claude Opus, Claude Sonnet, GPT-OSS", window: .fiveHour, group: "Other models"),
                 UsageMetric(id: "antigravity.3p-weekly", title: "Other models weekly", usedPercent: 48, resetsAt: later(5 * 24 + 7), detail: "Claude Opus, Claude Sonnet, GPT-OSS", window: .weekly, group: "Other models"),
             ], fetchedAt: now),
+            ProviderSnapshot(provider: .gemini, plan: "Pro", metrics: [
+                UsageMetric(id: "gemini.fiveHour", title: "5-hour", usedPercent: 14, resetsAt: later(4.2), window: .fiveHour),
+                UsageMetric(id: "gemini.weekly", title: "Weekly", usedPercent: 29, resetsAt: later(3 * 24 + 18), window: .weekly),
+            ], fetchedAt: now),
             ProviderSnapshot(provider: .amp, plan: "Megawatt", metrics: [
                 UsageMetric(id: "amp.agent", title: "AI model", usedPercent: 23, resetsAt: later(22 * 24), detail: "$15.40 / $20 left", window: .monthly),
                 UsageMetric(id: "amp.orb", title: "Orb", usedPercent: 41, resetsAt: later(22 * 24), detail: "443 / 750 h left", window: .monthly),

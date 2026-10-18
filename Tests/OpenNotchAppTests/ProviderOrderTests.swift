@@ -24,17 +24,17 @@ struct ProviderOrderTests {
 
         let settings = AppSettings(defaults: defaults)
         settings.moveProvider(.claude, to: .devin)
-        #expect(settings.providerOrder == [.chatgpt, .cursor, .devin, .claude, .antigravity, .amp])
+        #expect(settings.providerOrder == [.chatgpt, .cursor, .devin, .claude, .antigravity, .gemini, .amp])
         settings.moveProvider(.amp, to: .chatgpt)
-        #expect(settings.providerOrder == [.amp, .chatgpt, .cursor, .devin, .claude, .antigravity])
+        #expect(settings.providerOrder == [.amp, .chatgpt, .cursor, .devin, .claude, .antigravity, .gemini])
         settings.moveProvider(.amp, to: .amp)
         #expect(settings.providerOrder.first == .amp)
     }
 
     @Test func providersMissingFromASavedOrderKeepTheirDefaultNeighbour() {
-        // Saved before Antigravity existed, with Amp moved to the top.
+        // Saved before Antigravity and Gemini existed, with Amp moved to the top.
         let order = AppSettings.completeOrder([.amp, .claude, .chatgpt, .cursor, .devin])
-        #expect(order == [.antigravity, .amp, .claude, .chatgpt, .cursor, .devin])
+        #expect(order == [.antigravity, .gemini, .amp, .claude, .chatgpt, .cursor, .devin])
         #expect(AppSettings.completeOrder([.devin, .devin]) == ProviderID.allCases)
     }
 
@@ -52,5 +52,11 @@ struct ProviderOrderTests {
             return
         }
         #expect(members.map(\.id) == ["o5", "ow"])
+    }
+
+    @Test func allProviderLogosLoad() {
+        for provider in ProviderID.allCases {
+            #expect(LogoLibrary.image(for: provider) != nil)
+        }
     }
 }

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import OpenNotchCore
@@ -236,6 +237,99 @@ struct AntigravityParsingTests {
         #expect(AntigravityProvider.planName(try JSON(string: #"{"currentTier": {"id": "free-tier", "name": "Antigravity"}}"#)) == "Free")
         #expect(AntigravityProvider.planName(try JSON(string: #"{"currentTier": {"id": "free-tier"}, "paidTier": {"id": "g1-ultra-lite-tier", "name": "Google AI Ultra"}}"#)) == "Ultra")
         #expect(AntigravityProvider.planName(try JSON(string: "{}")) == nil)
+    }
+}
+
+@Suite("Gemini")
+struct GeminiParsingTests {
+    let response = """
+    {
+      "userTier": "TIER_NEON",
+      "usage": [
+        {
+          "budgetPoolType": "GXU_WEEKLY",
+          "gxu": {
+            "windowRefreshesAt": "2026-10-20T18:30:00.559555Z",
+            "pctUsed": 0.2936904,
+            "title": "Weekly limit"
+          }
+        },
+        {
+          "budgetPoolType": "GXU_FIVE_HOURLY",
+          "gxu": {
+            "windowRefreshesAt": "2026-10-18T20:30:00.559383Z",
+            "pctUsed": 0,
+            "title": "Current usage"
+          }
+        }
+      ]
+    }
+    """
+
+    @Test func fiveHourThenWeeklyAndPlanMapping() throws {
+        let parsed = GeminiProvider.parse(usageInfo: try JSON(string: response))
+        #expect(parsed.plan == "Ultra")
+        #expect(parsed.metrics.map(\.id) == ["gemini.fiveHour", "gemini.weekly"])
+        #expect(parsed.metrics.map(\.title) == ["5-hour", "Weekly"])
+        #expect(parsed.metrics[0].usedPercent == 0)
+        #expect(parsed.metrics[0].resetsAt == nil)
+        #expect(abs(parsed.metrics[1].usedPercent - 29.36904) < 0.001)
+        #expect(parsed.metrics[1].resetsAt == ISODate.parse("2026-10-20T18:30:00.559Z"))
+    }
+
+    @Test func tierMappingsAndOverageCredits() throws {
+        #expect(GeminiProvider.planName("TIER_NEON") == "Ultra")
+        #expect(GeminiProvider.planName("TIER_ULTRA") == "Ultra")
+        #expect(GeminiProvider.planName("TIER_PRO") == "Pro")
+        #expect(GeminiProvider.planName("TIER_PREMIUM") == "Pro")
+        #expect(GeminiProvider.planName("TIER_HELIUM") == "Plus")
+        #expect(GeminiProvider.planName("TIER_LITE") == "Plus")
+        #expect(GeminiProvider.planName("TIER_BASIC") == "Free")
+        #expect(GeminiProvider.planName(nil) == nil)
+
+        let withCredits = """
+        {
+          "userTier": "TIER_ULTRA",
+          "usage": [
+            {"budgetPoolType": "GXU_FIVE_HOURLY", "gxu": {"pctUsed": 0.5, "windowRefreshesAt": "2026-10-18T20:30:00Z"}},
+            {"budgetPoolType": "OVERAGE_CREDITS", "credits": {"creditsRemaining": 450, "useOverageAiCredits": true}}
+          ]
+        }
+        """
+        let parsed = GeminiProvider.parse(usageInfo: try JSON(string: withCredits))
+        #expect(parsed.plan == "Ultra")
+        #expect(parsed.metrics.first?.detail == "450 credits left")
+    }
+
+    @Test func containerAndKeystoreDecryption() throws {
+        // Build a synthetic Keystore protobuf: field 1 = magic (1), field 2 = KeyData { 1: 1, 2: 1, 4: <32-byte key> }
+        let key = Data((0..<32).map(UInt8.init))
+        var keyData = Data([0x08, 0x01, 0x10, 0x01, 0x22, 0x20])
+        keyData.append(key)
+        var keystore = Data([0x08, 0x01, 0x12, UInt8(keyData.count)])
+        keystore.append(keyData)
+
+        #expect(GeminiProvider.extractCredentialsKey(from: keystore) == key)
+
+        // Build StoredCredentialData protobuf with field 4 (refresh_token) = "1//test-refresh-token"
+        let tokenBytes = Data("1//test-refresh-token".utf8)
+        var plaintext = Data([0x22, UInt8(tokenBytes.count)])
+        plaintext.append(tokenBytes)
+
+        let nonce = Data((0..<12).map { UInt8($0 + 10) })
+        let sealed = try AES.GCM.seal(plaintext, using: SymmetricKey(data: key), nonce: AES.GCM.Nonce(data: nonce))
+        var preamble = Data([0x08, 0x01, 0x10, 0x01, 0x18, 0x01, 0x22, 0x0c])
+        preamble.append(nonce)
+
+        var container = Data(GeminiProvider.containerMagic)
+        var preambleLen = UInt32(preamble.count).littleEndian
+        withUnsafeBytes(of: &preambleLen) { container.append(contentsOf: $0) }
+        container.append(preamble)
+        container.append(sealed.ciphertext)
+        container.append(sealed.tag)
+
+        let decrypted = try GeminiProvider.decryptContainer(container, key: key)
+        #expect(GeminiProvider.parseRefreshToken(from: decrypted) == "1//test-refresh-token")
     }
 }
 

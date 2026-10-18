@@ -29,6 +29,7 @@ public enum ProviderRegistry {
             .cursor: CursorProvider(http: http),
             .devin: DevinProvider(http: http),
             .antigravity: AntigravityProvider(http: http),
+            .gemini: GeminiProvider(http: http),
             .amp: AmpProvider(http: http),
         ]
     }
