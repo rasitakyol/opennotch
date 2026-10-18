@@ -212,6 +212,47 @@ enum DesktopKeychain {
         }
     }
 
+    enum ReadResult: Sendable {
+        case success(Data)
+        case interactionRequired
+        case unavailable
+    }
+
+    static func readData(
+        service: String,
+        account: String,
+        interaction: Interaction = .forbidden,
+        reason: String = "Read usage limits in OpenNotch"
+    ) async -> ReadResult {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                let result: ReadResult = (try? withInteractionPolicy(interaction) {
+                    let context = LAContext()
+                    context.interactionNotAllowed = interaction == .forbidden
+                    context.localizedReason = reason
+                    let query: [String: Any] = [
+                        kSecClass as String: kSecClassGenericPassword,
+                        kSecAttrService as String: service,
+                        kSecAttrAccount as String: account,
+                        kSecMatchLimit as String: kSecMatchLimitOne,
+                        kSecReturnData as String: true,
+                        kSecUseAuthenticationContext as String: context,
+                    ]
+                    var item: CFTypeRef?
+                    let status = SecItemCopyMatching(query as CFDictionary, &item)
+                    if status == errSecSuccess, let data = item as? Data {
+                        return .success(data)
+                    }
+                    if [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled].contains(status) {
+                        return .interactionRequired
+                    }
+                    return .unavailable
+                }) ?? .unavailable
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
     /// LAContext alone does not suppress legacy login-Keychain ACL dialogs. The deprecated SecKeychain
     /// interaction API is still needed for Electron's legacy item. Abort if the guard cannot be set.
     static func withInteractionPolicy<T>(

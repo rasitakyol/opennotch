@@ -13,6 +13,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
     case cursor
     case devin
     case antigravity
+    case gemini
     case amp
 
     public var id: String { rawValue }
@@ -24,6 +25,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .cursor: "Cursor"
         case .devin: "Devin"
         case .antigravity: "Antigravity"
+        case .gemini: "Gemini"
         case .amp: "Amp"
         }
     }
@@ -36,6 +38,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .cursor: "Cursor / Grok Bot session"
         case .devin: "Devin CLI / Devin Desktop session"
         case .antigravity: "Antigravity / agy CLI session"
+        case .gemini: "Gemini app session"
         case .amp: "Amp CLI session"
         }
     }
@@ -48,6 +51,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .cursor: "Sign in to Cursor or Grok Bot."
         case .devin: "Run `devin auth login` in Terminal."
         case .antigravity: "Sign in to Antigravity or run `agy`."
+        case .gemini: "Sign in to the Gemini app."
         case .amp: "Run `amp login` in Terminal."
         }
     }
@@ -60,6 +64,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .cursor: "Open Cursor to refresh the session."
         case .devin: "Open Devin to refresh the session."
         case .antigravity: "Open the Antigravity app to update its limits."
+        case .gemini: "Open the Gemini app to refresh the session."
         case .amp: "Run Amp to refresh the session."
         }
     }
@@ -70,8 +75,8 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         case .chatgpt: URL(string: "https://chatgpt.com/codex/settings/usage")
         case .cursor: URL(string: "https://cursor.com/dashboard?tab=usage")
         case .devin: URL(string: "https://app.devin.ai")
-        // Antigravity shows its limits only inside the app.
-        case .antigravity: nil
+        // Antigravity and Gemini show their limits only inside their apps.
+        case .antigravity, .gemini: nil
         case .amp: URL(string: "https://ampcode.com/settings")
         }
     }

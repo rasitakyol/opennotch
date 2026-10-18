@@ -6,16 +6,16 @@
 
 <p align="center">
   <b>Your AI usage limits, living in your MacBook's notch.</b><br>
-  Claude · ChatGPT (Codex) · Cursor · Devin · Antigravity · Amp — read with the sessions already on your Mac. No API keys.
+  Claude · ChatGPT (Codex) · Cursor · Devin · Antigravity · Gemini · Amp — read with the sessions already on your Mac. No API keys.
 </p>
 
 <p align="center">
-  <img src="docs/images/notch-open.png" width="640" alt="OpenNotch open, showing usage limits for Claude, ChatGPT, Cursor, Devin, Antigravity and Amp">
+  <img src="docs/images/notch-open.png" width="640" alt="OpenNotch open, showing usage limits for Claude, ChatGPT, Cursor, Devin, Antigravity, Gemini and Amp">
 </p>
 
 ## Why
 
-If you use several AI coding tools, their limits live in six different places: a 5-hour window here, a weekly quota there, a monthly pool somewhere else. OpenNotch puts all of them in one glanceable spot — the notch — so you know which tool still has headroom before you start a long task.
+If you use several AI coding tools, their limits live in different places: a 5-hour window here, a weekly quota there, a monthly pool somewhere else. OpenNotch puts all of them in one glanceable spot — the notch — so you know which tool still has headroom before you start a long task.
 
 ## Features
 
@@ -41,6 +41,7 @@ If you use several AI coding tools, their limits live in six different places: a
 | **Cursor** | One Weekly pool on The X Subscription. Older plans show Grok & Composer, plus Grok Bot when that allowance is still separate | Cursor app (`state.vscdb`) or the Grok Bot app |
 | **Devin** | Weekly quota (plus Daily when your plan shows it), extra usage balance | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
 | **Antigravity** | Gemini models 5-hour and Weekly; Other models (Claude, GPT-OSS) 5-hour and Weekly, shared in one cell | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running Antigravity app |
+| **Gemini** | 5-hour and Weekly usage pools, plus remaining AI credits when active | Gemini macOS app — `~/Library/Application Support/com.google.GeminiMacOS` (`Gemini Safe Storage` Keychain key) |
 | **Amp** | AI model (agent) usage, Orb hours, credits balance | Amp CLI — `~/.local/share/amp/secrets.json` |
 
 Tools you aren't signed in to are simply hidden. Each one can also be turned off in Settings, and dragged into the order you want.
@@ -107,6 +108,7 @@ For every tool, OpenNotch reads the token that tool already keeps on your Mac an
 | Cursor | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`, `…/GetPlanInfo` (weekly or monthly included usage) and `…/GetSandUsageStatus` (Grok Bot) |
 | Devin | `POST https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus` |
 | Antigravity | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` and `…:loadCodeAssist` (plan); after the session expires, the same calls on the running app's loopback server (`…LanguageServerService/RetrieveUserQuotaSummary`, `…/GetLoadCodeAssist`) |
+| Gemini | `POST https://robinfrontend-pa.googleapis.com/$rpc/assistant.mobile.robin.RobinService/GetUsageInfo` |
 | Amp | `POST https://ampcode.com/api/internal?userDisplayBalanceInfo` (the call behind `amp usage`) |
 
 **Privacy notes**
@@ -149,7 +151,7 @@ For the Desktop integration's local permission checks, see [the manual verificat
 
 ## Disclaimer
 
-OpenNotch is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Anysphere (Cursor), Cognition (Devin), Google (Antigravity) or Amp. Product names and logos are trademarks of their respective owners and are used only to identify the services.
+OpenNotch is an independent project and is not affiliated with or endorsed by Anthropic, OpenAI, Anysphere (Cursor), Cognition (Devin), Google (Antigravity, Gemini) or Amp. Product names and logos are trademarks of their respective owners and are used only to identify the services.
 
 ## License
 
