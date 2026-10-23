@@ -1,7 +1,8 @@
 import Foundation
 
-/// Devin plan quota (weekly, plus daily when the plan exposes it), read with the Devin CLI key or the
-/// Devin Desktop (formerly Windsurf) session.
+/// Devin plan quota, read with the Devin CLI key or the Devin Desktop (formerly Windsurf) session.
+///
+/// Pro shows Daily and Weekly. Max hides the daily quota, so only Weekly remains. Extra usage is not shown.
 public struct DevinProvider: UsageProvider {
     public let id = ProviderID.devin
     private let http: HTTPClient
@@ -109,10 +110,6 @@ public struct DevinProvider: UsageProvider {
             metrics.append(UsageMetric(id: "devin.credits", title: "Credits", usedPercent: used / available * 100, resetsAt: planEnd, window: .monthly))
         }
 
-        var balance: UsageBalance?
-        if let micros = status["overageBalanceMicros"].double, micros > 0 {
-            balance = UsageBalance(title: "Extra usage", amount: micros / 1_000_000)
-        }
-        return (info["planName"].string, metrics, balance)
+        return (info["planName"].string, metrics, nil)
     }
 }

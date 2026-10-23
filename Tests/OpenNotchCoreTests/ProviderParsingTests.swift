@@ -20,16 +20,16 @@ struct ClaudeParsingTests {
     }
     """
 
-    @Test func readsSessionWeeklyAndModelLimits() throws {
+    @Test func readsSessionAndWeeklyAndSkipsModelPools() throws {
         let metrics = ClaudeProvider.parseUsage(try JSON(string: response))
-        #expect(metrics.map(\.title) == ["5-hour", "Weekly", "Weekly · Fable"])
-        #expect(metrics.map(\.usedPercent) == [0, 69, 61])
+        #expect(metrics.map(\.title) == ["5-hour", "Weekly"])
+        #expect(metrics.map(\.usedPercent) == [0, 69])
         #expect(metrics[0].window == .fiveHour)
-        #expect(metrics[2].resetsAt == ISODate.parse("2026-09-26T01:59:59.570Z"))
+        #expect(metrics[1].resetsAt == ISODate.parse("2026-09-26T01:59:59.570Z"))
     }
 
     @Test func fallsBackToLegacyKeys() throws {
-        let legacy = #"{"five_hour": {"utilization": 12.5, "resets_at": "2026-09-26T00:00:00Z"}, "seven_day": {"utilization": 40}}"#
+        let legacy = #"{"five_hour": {"utilization": 12.5, "resets_at": "2026-09-26T00:00:00Z"}, "seven_day": {"utilization": 40}, "seven_day_opus": {"utilization": 80}, "seven_day_sonnet": {"utilization": 10}}"#
         let metrics = ClaudeProvider.parseUsage(try JSON(string: legacy))
         #expect(metrics.map(\.id) == ["claude.five_hour", "claude.seven_day"])
         #expect(metrics.first?.usedPercent == 12.5)
@@ -160,8 +160,7 @@ struct DevinParsingTests {
         #expect(parsed.metrics.map(\.title) == ["Weekly"])
         #expect(parsed.metrics[0].usedPercent == 87)
         #expect(parsed.metrics[0].resetsAt == Date(timeIntervalSince1970: 1_790_496_000))
-        #expect(parsed.balance?.title == "Extra usage")
-        #expect(parsed.balance.map { UsageFormat.dollars($0.amount) } == "$4.79")
+        #expect(parsed.balance == nil)
     }
 
     @Test func noBalanceWithoutOverage() throws {
@@ -208,20 +207,19 @@ struct AntigravityParsingTests {
     }
     """
 
-    @Test func geminiCellsThenOtherModelsPool() throws {
+    @Test func geminiFiveHourAndWeeklyOnly() throws {
         let metrics = AntigravityProvider.parse(quotaSummary: try JSON(string: response))
-        #expect(metrics.map(\.title) == ["Gemini 5-hour", "Gemini weekly", "Other models 5-hour", "Other models weekly"])
-        #expect(metrics.map(\.group) == [nil, nil, "Other models", "Other models"])
-        #expect(metrics.map { $0.usedPercent.rounded() } == [60, 18, 100, 0])
+        #expect(metrics.map(\.title) == ["5-hour", "Weekly"])
+        #expect(metrics.map(\.id) == ["antigravity.gemini-5h", "antigravity.gemini-weekly"])
+        #expect(metrics.map { $0.usedPercent.rounded() } == [60, 18])
         #expect(metrics[0].resetsAt == ISODate.parse("2026-10-01T11:23:55Z"))
-        #expect(metrics[2].detail == "Claude Opus, Claude Sonnet, GPT-OSS")
-        #expect(metrics[0].detail == nil)
+        #expect(metrics.allSatisfy { $0.group == nil && $0.detail == nil })
     }
 
     @Test func untouchedWindowHasNoReset() throws {
-        let metrics = AntigravityProvider.parse(quotaSummary: try JSON(string: response))
+        let json = try JSON(string: #"{"groups": [{"displayName": "Gemini Models", "buckets": [{"bucketId": "gemini-weekly", "window": "weekly", "remainingFraction": 1, "resetTime": "2026-10-08T06:23:55Z"}]}]}"#)
         // A full window reports "now + 7 days", which would slide on every refresh.
-        #expect(metrics[3].resetsAt == nil)
+        #expect(AntigravityProvider.parse(quotaSummary: json).first?.resetsAt == nil)
     }
 
     @Test func disabledBucketsAreSkipped() throws {

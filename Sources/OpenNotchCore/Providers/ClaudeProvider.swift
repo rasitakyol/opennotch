@@ -142,8 +142,8 @@ public struct ClaudeProvider: UsageProvider {
         )
     }
 
-    /// Prefers the generic `limits` list (session, weekly, per-model weekly such as Fable) and
-    /// falls back to the older fixed keys when it is missing.
+    /// Prefers the generic `limits` list (the session and the shared weekly pool) and falls back to
+    /// the older fixed keys when it is missing. Per-model pools such as Fable are not shown.
     public static func parseUsage(_ json: JSON) -> [UsageMetric] {
         var metrics: [UsageMetric] = []
         var seen = Set<String>()
@@ -175,25 +175,15 @@ public struct ClaudeProvider: UsageProvider {
                 continue
             }
 
-            if let scopeName, !scopeName.isEmpty {
-                add(UsageMetric(
-                    id: "claude.\(window.rawValue).\(scopeName.lowercased())",
-                    title: "\(window.title) · \(scopeName)",
-                    usedPercent: percent,
-                    resetsAt: reset,
-                    window: window
-                ))
-            } else {
-                add(UsageMetric(id: "claude.\(window.rawValue)", title: window.title, usedPercent: percent, resetsAt: reset, window: window))
-            }
+            // A named scope is a per-model pool (Fable, Opus, Sonnet). The row shows the shared windows only.
+            if let scopeName, !scopeName.isEmpty { continue }
+            add(UsageMetric(id: "claude.\(window.rawValue)", title: window.title, usedPercent: percent, resetsAt: reset, window: window))
         }
 
         if metrics.isEmpty {
             let legacy: [(key: String, title: String, window: UsageWindow)] = [
                 ("five_hour", UsageWindow.fiveHour.title, .fiveHour),
                 ("seven_day", UsageWindow.weekly.title, .weekly),
-                ("seven_day_opus", "Weekly · Opus", .weekly),
-                ("seven_day_sonnet", "Weekly · Sonnet", .weekly),
             ]
             for item in legacy {
                 let bucket = json[item.key]
