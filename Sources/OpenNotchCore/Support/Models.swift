@@ -61,7 +61,7 @@ public enum ProviderID: String, CaseIterable, Codable, Sendable, Identifiable, H
         switch self {
         case .claude: "Open Claude Code once to refresh the session."
         case .chatgpt: "Run Codex once to refresh the session."
-        case .cursor: "Open Cursor to refresh the session."
+        case .cursor: "Open Cursor or Grok Bot to refresh the session."
         case .devin: "Open Devin to refresh the session."
         case .antigravity: "Open the Antigravity app to update its limits."
         case .gemini: "Open the Gemini app to refresh the session."

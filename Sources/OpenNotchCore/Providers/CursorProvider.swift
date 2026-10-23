@@ -1,7 +1,12 @@
 import Foundation
+import os
 
 /// Cursor included usage, read with the session of the Cursor IDE or the Grok Bot app (both sign into
 /// the same account).
+///
+/// The IDE token is tried first when both expire together. If that session is rejected, Grok Bot's
+/// active account is next, then any other saved Grok Bot account. Encrypted copies are unwrapped
+/// with the app's own Keychain key. Refresh tokens are never read.
 ///
 /// The X Subscription has one weekly pool for Grok, Grok Bot, and Cursor. A separate Grok Bot quota is
 /// shown only when that allowance still comes from a SuperGrok plan that has not moved onto it.
@@ -30,14 +35,14 @@ public struct CursorProvider: UsageProvider {
     }
 
     public func fetch() async throws -> ProviderSnapshot {
-        let tokens = Self.localTokens()
-        guard !tokens.isEmpty else { throw ProviderIssue.notConfigured }
-        // Several apps may hold a token for the account; use the one that stays valid the longest.
-        guard let token = tokens
-            .filter({ !JWT.isExpired($0) })
-            .max(by: { (JWT.expiry($0) ?? .distantPast) < (JWT.expiry($1) ?? .distantPast) })
-        else { throw ProviderIssue.expired }
+        let material = await Self.loadMaterial()
+        return try await CursorSessions.resolve(material) { candidate in
+            try await self.snapshot(using: candidate)
+        }
+    }
 
+    private func snapshot(using candidate: CursorSessions.Candidate) async throws -> ProviderSnapshot {
+        let token = candidate.token
         async let usageCall = http.connect(Self.api.appendingPathComponent("GetCurrentPeriodUsage"), bearer: token)
         async let planCall = try? http.connect(Self.api.appendingPathComponent("GetPlanInfo"), bearer: token)
         async let grokBotCall = try? http.connect(Self.api.appendingPathComponent("GetSandUsageStatus"), bearer: token)
@@ -48,26 +53,45 @@ public struct CursorProvider: UsageProvider {
         let metrics = Self.parse(usage: usage, grokBot: grokBot, plan: plan)
         guard !metrics.isEmpty else { throw ProviderIssue.unexpected("No usage data found") }
         let membership = SQLiteKV.value(forKey: "cursorAuth/stripeMembershipType", databaseAt: Self.ideDatabase)
-        return ProviderSnapshot(provider: id, plan: Self.planName(plan: plan, grokBot: grokBot, membership: membership), metrics: metrics)
+        return ProviderSnapshot(
+            provider: id,
+            plan: Self.planName(plan: plan, grokBot: grokBot, membership: membership),
+            metrics: metrics,
+            credentialSource: candidate.source
+        )
     }
 
-    static func localTokens() -> [String] {
-        var tokens: [String] = []
-        if let token = SQLiteKV.value(forKey: "cursorAuth/accessToken", databaseAt: ideDatabase), !token.isEmpty {
-            tokens.append(token)
+    private static func loadMaterial() async -> CursorSessions.Material {
+        let ide = SQLiteKV.value(forKey: "cursorAuth/accessToken", databaseAt: ideDatabase)
+        let secrets = LocalFiles.json(grokBotSecrets)
+        async let cursorPassword = CursorSafeStorage.password(
+            needed: CursorSessions.isSealed(ide),
+            service: "Cursor Safe Storage",
+            accounts: ["Cursor Key", "Cursor"],
+            reason: "Read Cursor usage limits in OpenNotch"
+        )
+        async let grokPassword = CursorSafeStorage.password(
+            needed: grokSecretsNeedsKey(secrets),
+            service: "Grok Bot Safe Storage",
+            accounts: ["Grok Bot Key", "Grok Bot"],
+            reason: "Read Grok Bot usage limits in OpenNotch"
+        )
+        return CursorSessions.material(
+            ideValue: ide,
+            grokSecrets: secrets,
+            decryptCursor: CursorSafeStorage.decrypt(await cursorPassword),
+            decryptGrok: CursorSafeStorage.decrypt(await grokPassword)
+        )
+    }
+
+    private static func grokSecretsNeedsKey(_ secrets: JSON?) -> Bool {
+        guard let secrets else { return false }
+        if CursorSessions.isSealed(secrets["cursor-access-token"].string) { return true }
+        guard let accountsText = secrets["cursor-accounts"].string,
+              let accounts = try? JSON(string: accountsText) else { return false }
+        return accounts["accounts"].dictionary.values.contains {
+            CursorSessions.isSealed($0["cursor-access-token"].string)
         }
-        if let secrets = LocalFiles.json(grokBotSecrets),
-           let accountsText = secrets["cursor-accounts"].string,
-           let accounts = try? JSON(string: accountsText) {
-            let active = accounts["active"].string
-            let ordered = accounts["accounts"].dictionary.sorted {
-                ($0.key == active ? 0 : 1, $0.key) < ($1.key == active ? 0 : 1, $1.key)
-            }
-            for (_, account) in ordered {
-                if let token = account["cursor-access-token"].string, !token.isEmpty { tokens.append(token) }
-            }
-        }
-        return tokens
     }
 
     /// `plan` is `GetPlanInfo`. A weekly included period, or `isUnified` on the Grok Bot status, means
@@ -145,5 +169,59 @@ public struct CursorProvider: UsageProvider {
     private static func isWeekly(_ value: JSON) -> Bool {
         if value.string?.lowercased().contains("weekly") == true { return true }
         return value.double == 2
+    }
+}
+
+/// Electron safe-storage password for Cursor or Grok Bot. The password stays in memory for this process.
+enum CursorSafeStorage {
+    private static let passwords = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
+    private static let prompted = OSAllocatedUnfairLock<Set<String>>(initialState: [])
+
+    static func password(needed: Bool, service: String, accounts: [String], reason: String) async -> String? {
+        guard needed else { return nil }
+        for account in accounts {
+            if let password = await password(service: service, account: account, reason: reason) {
+                return password
+            }
+        }
+        return nil
+    }
+
+    static func decrypt(_ password: String?) -> @Sendable (Data) -> String? {
+        guard let password, !password.isEmpty else { return { _ in nil } }
+        return { data in
+            guard let clear = ClaudeDesktopCredentials.decrypt(data, password: password),
+                  let text = String(data: clear, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty else { return nil }
+            return text
+        }
+    }
+
+    private static func password(service: String, account: String, reason: String) async -> String? {
+        let key = "\(service)\n\(account)"
+        if let cached = passwords.withLock({ $0[key] }) { return cached }
+
+        let silent = await DesktopKeychain.readData(service: service, account: account, interaction: .forbidden, reason: reason)
+        let result: DesktopKeychain.ReadResult
+        switch silent {
+        case .success:
+            result = silent
+        case .unavailable:
+            return nil
+        case .interactionRequired:
+            let shouldPrompt = prompted.withLock { asked -> Bool in
+                guard !asked.contains(key) else { return false }
+                asked.insert(key)
+                return true
+            }
+            guard shouldPrompt else { return nil }
+            result = await DesktopKeychain.readData(service: service, account: account, interaction: .userInitiated, reason: reason)
+        }
+
+        guard case .success(let data) = result,
+              let password = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !password.isEmpty else { return nil }
+        passwords.withLock { $0[key] = password }
+        return password
     }
 }
