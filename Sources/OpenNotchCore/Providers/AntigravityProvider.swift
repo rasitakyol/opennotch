@@ -1,6 +1,6 @@
 import Foundation
 
-/// Antigravity model pools (Gemini models; Claude & GPT models), each with a 5-hour and a weekly limit.
+/// Antigravity's Gemini pool: a 5-hour limit and a weekly limit. The third-party Other models pool is not shown.
 ///
 /// The Antigravity app and the `agy` CLI share a Google session file, but its access token lives about an
 /// hour and both renew it only in memory. Once the file has expired, OpenNotch asks the running app's local
@@ -15,8 +15,6 @@ public struct AntigravityProvider: UsageProvider {
 
     static let api = "https://cloudcode-pa.googleapis.com/v1internal"
     static let appService = "exa.language_server_pb.LanguageServerService"
-    static let otherModels = "Other models"
-
     public init(http: HTTPClient = .shared) {
         self.init(
             requestJSON: { try await http.json($0) },
@@ -324,42 +322,32 @@ public struct AntigravityProvider: UsageProvider {
         }
     }
 
-    /// Gemini limits get a cell each; every other pool's limits share one cell titled with the pool.
+    /// Gemini's 5-hour and weekly limits, one cell each. Other model pools are left out.
     public static func parse(quotaSummary json: JSON) -> [UsageMetric] {
-        var gemini: [UsageMetric] = []
-        var others: [UsageMetric] = []
+        var metrics: [UsageMetric] = []
 
         for group in json["groups"].array {
             let name = group["displayName"].string ?? ""
             let buckets = group["buckets"].array.filter { $0["disabled"].bool != true }
             let bucketIDs = buckets.compactMap { $0["bucketId"].string }
             let isGemini = name.lowercased().hasPrefix("gemini") || bucketIDs.contains { $0.hasPrefix("gemini") }
-            // "3p" buckets are the third-party models (Claude, GPT-OSS).
-            let label = isGemini ? "Gemini" : (bucketIDs.contains { $0.hasPrefix("3p") } || name.isEmpty ? otherModels : name)
-            // "Models within this group: Claude Opus, Claude Sonnet, GPT-OSS" → the list itself.
-            let models = group["description"].string.map { text in
-                text.range(of: ":").map { String(text[$0.upperBound...]).trimmingCharacters(in: .whitespaces) } ?? text
-            }
+            guard isGemini else { continue }
 
-            var metrics: [UsageMetric] = []
             for bucket in buckets {
                 guard let remaining = bucket["remainingFraction"].double else { continue }
                 let window = window(bucket["window"].string)
+                guard window == .fiveHour || window == .weekly else { continue }
                 metrics.append(UsageMetric(
-                    id: "antigravity.\(bucket["bucketId"].string ?? "\(label.lowercased()).\(window.rawValue)")",
-                    title: "\(label) \(window.title.lowercased())",
+                    id: "antigravity.\(bucket["bucketId"].string ?? "gemini.\(window.rawValue)")",
+                    title: window.title,
                     usedPercent: (1 - min(max(remaining, 0), 1)) * 100,
                     // An untouched window reports "now + its length", which would restart on every refresh.
                     resetsAt: remaining < 1 ? ISODate.parse(bucket["resetTime"].string) : nil,
-                    detail: isGemini ? nil : models,
-                    window: window,
-                    group: isGemini ? nil : label
+                    window: window
                 ))
             }
-            metrics.sort { $0.window.sortOrder < $1.window.sortOrder }
-            if isGemini { gemini += metrics } else { others += metrics }
         }
-        return gemini + others
+        return metrics.sorted { $0.window.sortOrder < $1.window.sortOrder }
     }
 
     static func window(_ name: String?) -> UsageWindow {

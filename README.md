@@ -36,11 +36,11 @@ If you use several AI coding tools, their limits live in different places: a 5-h
 
 | Service | Limits shown | Session it reads |
 | --- | --- | --- |
-| **Claude** | 5-hour, Weekly, Weekly per model (e.g. Fable) | Claude Code — macOS Keychain item `Claude Code-credentials` (or `~/.claude/.credentials.json`); optional Claude Desktop fallback |
+| **Claude** | 5-hour and Weekly | Claude Code — macOS Keychain item `Claude Code-credentials` (or `~/.claude/.credentials.json`); optional Claude Desktop fallback |
 | **ChatGPT** | Codex limits of your plan (5-hour and/or Weekly) | Codex CLI — `~/.codex/auth.json` |
 | **Cursor** | One Weekly pool on The X Subscription. Older plans show Grok & Composer, plus Grok Bot when that allowance is still separate | Cursor app (`state.vscdb`) or the Grok Bot app |
-| **Devin** | Weekly quota (plus Daily when your plan shows it), extra usage balance | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
-| **Antigravity** | Gemini models 5-hour and Weekly; Other models (Claude, GPT-OSS) 5-hour and Weekly, shared in one cell | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running Antigravity app |
+| **Devin** | Daily and Weekly on Pro; Weekly only when the plan hides the daily quota (Max) | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
+| **Antigravity** | Gemini 5-hour and Weekly | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running Antigravity app |
 | **Gemini** | 5-hour and Weekly usage pools, plus remaining AI credits when active | Gemini macOS app — `~/Library/Application Support/com.google.GeminiMacOS` (`Gemini Safe Storage` Keychain key) |
 | **Amp** | AI model (agent) usage, Orb hours, credits balance | Amp CLI — `~/.local/share/amp/secrets.json` |
 
@@ -64,7 +64,7 @@ make install
 - **↻** refreshes everything now, **⚙** opens Settings.
 - **Right-click** the notch for Refresh Now, Settings and Quit.
 - Hover a row and click **↗** to open that service's own usage page.
-- Each row shows when its usage was last successfully updated. A **⚠︎** means the latest check failed: the last known numbers stay visible, with the failure and recovery step below the row. The header's **checked** time records the latest attempt, including failures.
+- Each row shows when its usage was last successfully updated. A **⚠︎** means the latest check failed: the last known numbers stay visible, with the failure and recovery step below the row. The header's short time (`just now`, `5m ago`) records the latest attempt, including failures.
 - **App is not running** for Antigravity means its saved session needs the running app to supply fresh usage. Open Antigravity and refresh. **App connection unavailable** means the local connection could not be read; reopen the app and retry.
 
 <p align="center">

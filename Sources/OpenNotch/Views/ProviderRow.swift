@@ -130,6 +130,7 @@ struct ProviderRow: View {
             HStack(spacing: Layout.metricGap) {
                 ForEach(0..<columns, id: \.self) { _ in SkeletonMetric() }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -139,6 +140,7 @@ struct ProviderRow: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             ForEach(rows.indices, id: \.self) { index in
+                // A row with one limit fills the width; two or three split it evenly.
                 HStack(alignment: .top, spacing: Layout.metricGap) {
                     ForEach(rows[index]) { cell in
                         switch cell {
@@ -151,6 +153,7 @@ struct ProviderRow: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -216,7 +219,7 @@ struct MetricCell: View {
             }
             .cellCaption()
         }
-        .frame(width: Layout.metricWidth)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .help(tooltip(percent: percent))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(provider.displayName), \(metric.title)")
@@ -273,7 +276,7 @@ struct MetricGroupCell: View {
             }
             .cellCaption()
         }
-        .frame(width: Layout.metricWidth)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .help(tooltip)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(provider.displayName), \(title)")
@@ -322,7 +325,7 @@ struct BalanceCell: View {
             }
             .cellCaption()
         }
-        .frame(width: Layout.metricWidth)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .help("\(balance.title): \(amount) left")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(provider.displayName), \(balance.title)")
@@ -423,7 +426,7 @@ private struct SkeletonMetric: View {
             Capsule().frame(width: 44, height: 6)
         }
         .foregroundStyle(Color.white.opacity(pulse ? 0.12 : 0.06))
-        .frame(width: Layout.metricWidth)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
         }

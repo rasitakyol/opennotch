@@ -110,7 +110,6 @@ enum DemoData {
             ProviderSnapshot(provider: .claude, plan: "Max 5x", metrics: [
                 UsageMetric(id: "claude.fiveHour", title: "5-hour", usedPercent: 42, resetsAt: later(2.3), window: .fiveHour),
                 UsageMetric(id: "claude.weekly", title: "Weekly", usedPercent: 68, resetsAt: later(61), window: .weekly),
-                UsageMetric(id: "claude.weekly.fable", title: "Weekly · Fable", usedPercent: 57, resetsAt: later(61), window: .weekly),
             ], fetchedAt: now),
             ProviderSnapshot(provider: .chatgpt, plan: "Plus", metrics: [
                 UsageMetric(id: "chatgpt.fiveHour", title: "5-hour", usedPercent: 18, resetsAt: later(3.8), window: .fiveHour),
@@ -120,13 +119,12 @@ enum DemoData {
                 UsageMetric(id: "cursor.weekly", title: "Weekly", usedPercent: 79, resetsAt: later(4 * 24 + 5), window: .weekly),
             ], fetchedAt: now),
             ProviderSnapshot(provider: .devin, plan: "Pro", metrics: [
+                UsageMetric(id: "devin.daily", title: "Daily", usedPercent: 18, resetsAt: later(8), window: .daily),
                 UsageMetric(id: "devin.weekly", title: "Weekly", usedPercent: 91, resetsAt: later(30), window: .weekly),
-            ], balance: UsageBalance(title: "Extra usage", amount: 12.5), fetchedAt: now),
+            ], fetchedAt: now),
             ProviderSnapshot(provider: .antigravity, plan: "Pro", metrics: [
-                UsageMetric(id: "antigravity.gemini-5h", title: "Gemini 5-hour", usedPercent: 37, resetsAt: later(3.1), window: .fiveHour),
-                UsageMetric(id: "antigravity.gemini-weekly", title: "Gemini weekly", usedPercent: 22, resetsAt: later(5 * 24 + 7), window: .weekly),
-                UsageMetric(id: "antigravity.3p-5h", title: "Other models 5-hour", usedPercent: 64, resetsAt: later(1.4), detail: "Claude Opus, Claude Sonnet, GPT-OSS", window: .fiveHour, group: "Other models"),
-                UsageMetric(id: "antigravity.3p-weekly", title: "Other models weekly", usedPercent: 48, resetsAt: later(5 * 24 + 7), detail: "Claude Opus, Claude Sonnet, GPT-OSS", window: .weekly, group: "Other models"),
+                UsageMetric(id: "antigravity.gemini-5h", title: "5-hour", usedPercent: 37, resetsAt: later(3.1), window: .fiveHour),
+                UsageMetric(id: "antigravity.gemini-weekly", title: "Weekly", usedPercent: 22, resetsAt: later(5 * 24 + 7), window: .weekly),
             ], fetchedAt: now),
             ProviderSnapshot(provider: .gemini, plan: "Pro", metrics: [
                 UsageMetric(id: "gemini.fiveHour", title: "5-hour", usedPercent: 14, resetsAt: later(4.2), window: .fiveHour),

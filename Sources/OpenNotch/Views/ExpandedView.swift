@@ -72,9 +72,8 @@ struct ExpandedView: View {
     }
 
     private func statusText(now: Date) -> String {
-        if store.isRefreshing { return "· refreshing…" }
-        guard let last = store.lastCheck else { return "" }
-        return "· checked \(UsageFormat.ago(last, now: now))"
+        guard let last = store.lastCheck else { return store.isRefreshing ? "· …" : "" }
+        return "· \(UsageFormat.ago(last, now: now))"
     }
 
     private var scheduleHelp: String {

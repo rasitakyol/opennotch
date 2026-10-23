@@ -156,7 +156,7 @@ public struct UsageMetric: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// Money on the account beyond the plan's limits (Devin extra usage, Amp credits), in US dollars.
+/// Money on the account beyond the plan's limits (Amp credits), in US dollars.
 public struct UsageBalance: Codable, Sendable, Hashable {
     public var title: String
     public var amount: Double
