@@ -329,6 +329,65 @@ struct GeminiParsingTests {
         let decrypted = try GeminiProvider.decryptContainer(container, key: key)
         #expect(GeminiProvider.parseRefreshToken(from: decrypted) == "1//test-refresh-token")
     }
+
+    @Test func omittedPctUsedDefaultsToZeroAndRequestUsesProtobufContentType() async throws {
+        let omittedPct = """
+        {
+          "userTier": "TIER_NEON",
+          "usage": [
+            {"budgetPoolType": "GXU_FIVE_HOURLY", "gxu": {"windowRefreshesAt": "2026-10-18T20:30:00Z", "title": "Current usage"}},
+            {"budgetPoolType": "GXU_WEEKLY", "gxu": {"windowRefreshesAt": "2026-10-20T18:30:00Z", "pctUsed": 0.25, "title": "Weekly limit"}}
+          ]
+        }
+        """
+        let key = Data((0..<32).map(UInt8.init))
+        var keyData = Data([0x08, 0x01, 0x10, 0x01, 0x22, 0x20])
+        keyData.append(key)
+        var keystore = Data([0x08, 0x01, 0x12, UInt8(keyData.count)])
+        keystore.append(keyData)
+
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let userDir = dir.appendingPathComponent("Data/u1")
+        try FileManager.default.createDirectory(at: userDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let tokenBytes = Data("1//test-refresh-token".utf8)
+        var plaintext = Data([0x22, UInt8(tokenBytes.count)])
+        plaintext.append(tokenBytes)
+        let nonce = Data((0..<12).map { UInt8($0 + 10) })
+        let sealed = try AES.GCM.seal(plaintext, using: SymmetricKey(data: key), nonce: AES.GCM.Nonce(data: nonce))
+        var preamble = Data([0x08, 0x01, 0x10, 0x01, 0x18, 0x01, 0x22, 0x0c])
+        preamble.append(nonce)
+        var container = Data(GeminiProvider.containerMagic)
+        var preambleLen = UInt32(preamble.count).littleEndian
+        withUnsafeBytes(of: &preambleLen) { container.append(contentsOf: $0) }
+        container.append(preamble)
+        container.append(sealed.ciphertext)
+        container.append(sealed.tag)
+        try container.write(to: userDir.appendingPathComponent("auth"))
+
+        let keystoreData = keystore
+        let dirPath = dir.path
+        let provider = GeminiProvider(
+            requestJSON: { req in
+                if req.url == GeminiProvider.tokenURL {
+                    return try JSON(string: #"{"access_token": "tok", "expires_in": 3600}"#)
+                }
+                #expect(req.url == GeminiProvider.usageURL)
+                #expect(req.url?.query?.contains("$alt=json") == true)
+                #expect(req.value(forHTTPHeaderField: "Content-Type") == "application/x-protobuf")
+                #expect((req.httpBody ?? Data()).isEmpty)
+                return try JSON(string: omittedPct)
+            },
+            loadKeystore: { keystoreData },
+            appSupportDirectory: { dirPath }
+        )
+
+        let snapshot = try await provider.fetch()
+        #expect(snapshot.plan == "Ultra")
+        #expect(snapshot.metrics.map(\.usedPercent) == [0, 25])
+        #expect(snapshot.metrics[0].resetsAt == nil)
+    }
 }
 
 @Suite("Amp")

@@ -13,7 +13,7 @@ public struct GeminiProvider: UsageProvider {
     private let loadKeystore: @Sendable () async -> Data?
     private let appSupportDirectory: @Sendable () -> String
 
-    static let usageURL = URL(string: "https://robinfrontend-pa.googleapis.com/$rpc/assistant.mobile.robin.RobinService/GetUsageInfo")!
+    static let usageURL = URL(string: "https://robinfrontend-pa.googleapis.com/$rpc/assistant.mobile.robin.RobinService/GetUsageInfo?$alt=json")!
     static let tokenURL = URL(string: "https://www.googleapis.com/oauth2/v4/token")!
     static let clientID = "839509190550-l232s7lupkp6f57818eshd7u4sl4920h.apps.googleusercontent.com"
     static let encodedClientSecret: [UInt8] = [
@@ -178,9 +178,9 @@ public struct GeminiProvider: UsageProvider {
     private func fetchUsage(accessToken: String, credentialSource: String) async throws -> ProviderSnapshot {
         var request = URLRequest(url: Self.usageURL)
         request.httpMethod = "POST"
-        request.httpBody = Data("{}".utf8)
+        request.httpBody = Data()
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/x-protobuf", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let json = try await requestJSON(request)
@@ -224,7 +224,8 @@ public struct GeminiProvider: UsageProvider {
 
         for entry in json["usage"].array {
             let poolType = entry["budgetPoolType"].string ?? ""
-            guard let pctUsed = entry["gxu"]["pctUsed"].double else { continue }
+            guard !entry["gxu"].isNull else { continue }
+            let pctUsed = entry["gxu"]["pctUsed"].double ?? 0
 
             let clamped = min(max(pctUsed, 0), 1)
             let (metricID, title, window): (String, String, UsageWindow) = switch poolType {
