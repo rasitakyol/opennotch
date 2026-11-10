@@ -42,7 +42,7 @@ If you use several AI coding tools, their limits live in different places: a 5-h
 | **Devin** | Daily and Weekly on Pro; Weekly only when the plan hides the daily quota (Max) | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
 | **Antigravity** | Gemini 5-hour and Weekly | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running Antigravity app |
 | **Gemini** | 5-hour and Weekly usage pools, plus remaining AI credits when active | Gemini macOS app — `~/Library/Application Support/com.google.GeminiMacOS` (`Gemini Safe Storage` Keychain key) |
-| **Amp** | AI model (agent) usage, Orb hours, credits balance | Amp CLI — `~/.local/share/amp/secrets.json` |
+| **Amp** | AI model (agent) usage and Orb hours | Amp CLI — `~/.local/share/amp/secrets.json` |
 
 Tools you aren't signed in to are simply hidden. Each one can also be turned off in Settings, and dragged into the order you want.
 

@@ -54,6 +54,14 @@ struct ProviderOrderTests {
         #expect(members.map(\.id) == ["o5", "ow"])
     }
 
+    @Test func ampPaidTierSplitsIntoTwoCellsWithoutCredits() {
+        let parsed = AmpProvider.parse(
+            displayText: "Amp Megawatt Tier: agent usage $19.98 of $20 remaining (99%), orb usage 425h of 750h a1.small orb hours remaining (57%) - renewal in 27 days\nIndividual credits: $8.71 remaining"
+        )
+        let snapshot = ProviderSnapshot(provider: .amp, plan: parsed.plan, metrics: parsed.metrics, balance: parsed.balance)
+        #expect(GridCell.cells(for: snapshot).map(\.id) == ["amp.agent", "amp.orb"])
+    }
+
     @Test func allProviderLogosLoad() {
         for provider in ProviderID.allCases {
             #expect(LogoLibrary.image(for: provider) != nil)

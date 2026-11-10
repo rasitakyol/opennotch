@@ -133,7 +133,7 @@ enum DemoData {
             ProviderSnapshot(provider: .amp, plan: "Megawatt", metrics: [
                 UsageMetric(id: "amp.agent", title: "AI model", usedPercent: 23, resetsAt: later(22 * 24), detail: "$15.40 / $20 left", window: .monthly),
                 UsageMetric(id: "amp.orb", title: "Orb", usedPercent: 41, resetsAt: later(22 * 24), detail: "443 / 750 h left", window: .monthly),
-            ], balance: UsageBalance(title: "Credits", amount: 6.2), fetchedAt: now),
+            ], fetchedAt: now),
         ]
         return Dictionary(uniqueKeysWithValues: snapshots.map { ($0.provider, ProviderState(snapshot: $0, lastAttempt: now)) })
     }
