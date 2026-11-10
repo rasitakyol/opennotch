@@ -408,7 +408,7 @@ struct AmpParsingTests {
         #expect(parsed.metrics[0].detail == "$19.27 / $20 left")
         #expect(parsed.metrics[1].detail == "475 / 750 h left")
         #expect(parsed.metrics[0].resetsAt == ISODate.parse("2026-10-18T00:00:00Z"))
-        #expect(parsed.balance == UsageBalance(title: "Credits", amount: 8.94))
+        #expect(parsed.balance == nil)
     }
 
     @Test func markdownVariantParsesTheSame() {

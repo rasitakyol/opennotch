@@ -24,6 +24,9 @@ struct SnapshotCache {
         for (key, var state) in stored {
             guard let provider = ProviderID(rawValue: key) else { continue }
             state.isLoading = false
+            if provider == .amp || provider == .devin {
+                state.snapshot?.balance = nil
+            }
             states[provider] = state
         }
         return states

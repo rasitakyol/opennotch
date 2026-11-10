@@ -1,6 +1,7 @@
 import Foundation
 
 /// Amp tier pools (agent usage in dollars, orb usage in hours), read with the Amp CLI's API key.
+/// Individual credits are not shown.
 ///
 /// Amp only exposes this through the same call `amp usage` makes, which returns display text,
 /// so the numbers are parsed out of that text.
@@ -111,11 +112,7 @@ public struct AmpProvider: UsageProvider {
             ))
         }
 
-        var balance: UsageBalance?
-        if let credits = firstMatch(#"Individual credits:?\s*\$([\d,]+(?:\.\d+)?) remaining"#, in: text), let value = number(credits[0]) {
-            balance = UsageBalance(title: "Credits", amount: value)
-        }
-        return (plan, metrics, balance)
+        return (plan, metrics, nil)
     }
 
     private static func firstMatch(_ pattern: String, in text: String) -> [String]? {
