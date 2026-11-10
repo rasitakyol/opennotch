@@ -109,7 +109,7 @@ For every tool, OpenNotch reads the token that tool already keeps on your Mac an
 | Devin | `POST https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus` |
 | Antigravity | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` and `…:loadCodeAssist` (plan); after the session expires, the same calls on the running app's loopback server (`…LanguageServerService/RetrieveUserQuotaSummary`, `…/GetLoadCodeAssist`) |
 | Gemini | `POST https://robinfrontend-pa.googleapis.com/$rpc/assistant.mobile.robin.RobinService/GetUsageInfo` |
-| Amp | `POST https://ampcode.com/api/internal?userDisplayBalanceInfo` (the call behind `amp usage`) |
+| Amp | `POST https://ampcode.com/api/internal?userDisplayBalanceInfo` (or `amp usage` when the CLI's 5-minute OAuth token needs renewal) |
 
 **Privacy notes**
 

@@ -27,37 +27,62 @@ enum ProcessRunner {
     struct Output: Sendable {
         let status: Int32
         let stdout: Data
+        let stderr: Data
+
+        init(status: Int32, stdout: Data, stderr: Data = Data()) {
+            self.status = status
+            self.stdout = stdout
+            self.stderr = stderr
+        }
     }
 
     private final class Buffer: @unchecked Sendable {
         var data = Data()
     }
 
-    /// Runs a short-lived tool off the cooperative pool and returns its stdout.
-    static func run(_ executable: String, _ arguments: [String], timeout: TimeInterval = 5) async -> Output? {
+    /// Runs a short-lived tool off the cooperative pool and returns its stdout and stderr.
+    static func run(
+        _ executable: String,
+        _ arguments: [String],
+        environment: [String: String]? = nil,
+        timeout: TimeInterval = 5
+    ) async -> Output? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: runBlocking(executable, arguments, timeout: timeout))
+                continuation.resume(returning: runBlocking(executable, arguments, environment: environment, timeout: timeout))
             }
         }
     }
 
-    private static func runBlocking(_ executable: String, _ arguments: [String], timeout: TimeInterval) -> Output? {
+    private static func runBlocking(
+        _ executable: String,
+        _ arguments: [String],
+        environment: [String: String]?,
+        timeout: TimeInterval
+    ) -> Output? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+        if let environment { process.environment = environment }
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
         process.standardInput = FileHandle.nullDevice
         do { try process.run() } catch { return nil }
 
-        // Drain stdout concurrently so a large payload can never fill the pipe and stall the child.
-        let buffer = Buffer()
+        // Drain stdout and stderr concurrently so a large payload can never fill either pipe and stall the child.
+        let outBuffer = Buffer()
+        let errBuffer = Buffer()
         let drained = DispatchGroup()
         drained.enter()
         DispatchQueue.global(qos: .utility).async {
-            buffer.data = pipe.fileHandleForReading.readDataToEndOfFile()
+            outBuffer.data = outPipe.fileHandleForReading.readDataToEndOfFile()
+            drained.leave()
+        }
+        drained.enter()
+        DispatchQueue.global(qos: .utility).async {
+            errBuffer.data = errPipe.fileHandleForReading.readDataToEndOfFile()
             drained.leave()
         }
         if drained.wait(timeout: .now() + timeout) == .timedOut {
@@ -65,7 +90,7 @@ enum ProcessRunner {
             return nil
         }
         process.waitUntilExit()
-        return Output(status: process.terminationStatus, stdout: buffer.data)
+        return Output(status: process.terminationStatus, stdout: outBuffer.data, stderr: errBuffer.data)
     }
 }
 

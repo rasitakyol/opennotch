@@ -425,6 +425,81 @@ struct AmpParsingTests {
         let refill = try #require(parsed.metrics[0].resetsAt)
         #expect(abs(refill.timeIntervalSince(now) - 5 * 3_600) < 1)
     }
+
+    @Test func expiredShortLivedOAuthTokenDelegatesToAmpCLI() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let secretsFile = dir.appendingPathComponent("secrets.json")
+
+        // {"exp": 1000} -> expired relative to `now` (2026-09-25)
+        let expiredJWT = "eyJhbGciOiJub25lIn0.eyJleHAiOjEwMDB9.sig"
+        let secrets = """
+        {
+          "oauth-refresh-token@https://ampcode.com/": "rt_test",
+          "apiKey@https://ampcode.com/": "\(expiredJWT)"
+        }
+        """
+        try Data(secrets.utf8).write(to: secretsFile)
+
+        let cliText = "**Amp Megawatt Tier:** agent usage $19.98 of $20.00 remaining (100%), orb usage 425.2h of 750h a1.small orb hours remaining (57%) - period 2026-11-08 to 2026-12-08"
+        let fixedNow = now
+        let secretsPath = secretsFile.path
+        let provider = AmpProvider(
+            requestJSON: { _ in
+                Issue.record("Expired OAuth JWT must not be sent directly over HTTP")
+                throw ProviderIssue.unauthorized
+            },
+            secretsPath: { secretsPath },
+            findCLI: { "/usr/local/bin/amp" },
+            runCLI: { cli in
+                #expect(cli == "/usr/local/bin/amp")
+                return ProcessRunner.Output(status: 0, stdout: Data(cliText.utf8))
+            },
+            now: { fixedNow }
+        )
+
+        let snapshot = try await provider.fetch()
+        #expect(snapshot.plan == "Megawatt")
+        #expect(snapshot.credentialSource == "Amp CLI")
+        #expect(snapshot.metrics.map(\.title) == ["AI model", "Orb"])
+        #expect(snapshot.balance == nil)
+    }
+
+    @Test func rejectedOAuthTokenFallsBackToCLIAndSurfacesRealAuthErrors() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let secretsFile = dir.appendingPathComponent("secrets.json")
+
+        // {"exp": 4102444800} -> future expiry, but rejected by server
+        let liveJWT = "eyJhbGciOiJub25lIn0.eyJleHAiOjQxMDI0NDQ4MDB9.sig"
+        let secrets = """
+        {
+          "oauth-refresh-token@https://ampcode.com/": "rt_test",
+          "apiKey@https://ampcode.com/": "\(liveJWT)"
+        }
+        """
+        try Data(secrets.utf8).write(to: secretsFile)
+
+        let secretsPath = secretsFile.path
+        let failingProvider = AmpProvider(
+            requestJSON: { _ in throw ProviderIssue.unauthorized },
+            secretsPath: { secretsPath },
+            findCLI: { "/usr/local/bin/amp" },
+            runCLI: { _ in
+                ProcessRunner.Output(
+                    status: 1,
+                    stdout: Data(),
+                    stderr: Data("Session expired and could not be refreshed. Run 'amp login' to authenticate.".utf8)
+                )
+            }
+        )
+
+        await #expect(throws: ProviderIssue.unauthorized) {
+            try await failingProvider.fetch()
+        }
+    }
 }
 
 @Suite("Formatting & summary")
