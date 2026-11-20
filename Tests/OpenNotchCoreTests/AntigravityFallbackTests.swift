@@ -238,4 +238,104 @@ struct AntigravityFallbackTests {
         #expect(snapshot.metrics.map(\.usedPercent) == [25])
         #expect(snapshot.credentialSource == "Running Gemini app")
     }
+
+    @Test func unavailableAppFallsBackToAgyCLI() async throws {
+        let session = credentials(expired: true)
+        let cliPayload = """
+        {
+          "status": "SUCCESS",
+          "response": "Gemini Models\\tWeekly Limit Remaining\\t97%\\t2026-11-26T06:29:48Z\\nGemini Models\\tFive Hour Limit Remaining\\t98%\\t2026-11-21T03:29:55Z\\n",
+          "command": {
+            "name": "usage",
+            "data": {
+              "groups": [
+                {
+                  "name": "Gemini Models",
+                  "buckets": [
+                    {"id": "gemini-weekly", "window": "weekly", "remaining_fraction": 0.97485566, "reset_time": "2026-11-26T06:29:48Z"},
+                    {"id": "gemini-5h", "window": "5h", "remaining_fraction": 0.98372084, "reset_time": "2026-11-21T03:29:55Z"}
+                  ]
+                },
+                {
+                  "name": "Claude and GPT models",
+                  "buckets": [
+                    {"id": "3p-weekly", "window": "weekly", "remaining_fraction": 1, "reset_time": "2026-11-27T22:36:53Z"}
+                  ]
+                }
+              ]
+            }
+          }
+        }
+        """
+        let provider = AntigravityProvider(
+            requestJSON: { _ in
+                Issue.record("Expired session should not call Google directly")
+                return try JSON(string: "{}")
+            },
+            loadCredentials: { session },
+            findApp: { .unavailable },
+            findCLI: { "/Users/example/.local/bin/agy" },
+            runCLI: { cli in
+                #expect(cli == "/Users/example/.local/bin/agy")
+                return ProcessRunner.Output(status: 0, stdout: Data(cliPayload.utf8))
+            }
+        )
+
+        #expect(await provider.detect())
+        let snapshot = try await provider.fetch()
+        #expect(snapshot.credentialSource == "Antigravity CLI")
+        #expect(snapshot.metrics.map(\.title) == ["5-hour", "Weekly"])
+        #expect(snapshot.metrics.map(\.id) == ["antigravity.gemini-5h", "antigravity.gemini-weekly"])
+        #expect(snapshot.metrics.map { Int($0.usedPercent.rounded()) } == [2, 3])
+        #expect(snapshot.metrics.allSatisfy { $0.group == nil })
+    }
+
+    @Test func closedAppFallsBackToAgyCLIWhenInstalled() async throws {
+        let session = credentials(expired: true)
+        let cliPayload = #"{"status":"SUCCESS","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"id":"gemini-5h","window":"5h","remaining_fraction":0.8,"reset_time":"2026-11-21T03:29:55Z"}]}]}}}"#
+        let provider = AntigravityProvider(
+            requestJSON: { _ in
+                Issue.record("Unexpected HTTP request")
+                return try JSON(string: "{}")
+            },
+            loadCredentials: { session },
+            findApp: { .notRunning },
+            findCLI: { "/usr/local/bin/agy" },
+            runCLI: { _ in ProcessRunner.Output(status: 0, stdout: Data(cliPayload.utf8)) }
+        )
+        let snapshot = try await provider.fetch()
+        #expect(snapshot.credentialSource == "Antigravity CLI")
+        #expect(snapshot.metrics.map { Int($0.usedPercent.rounded()) } == [20])
+    }
+
+    @Test func cliErrorsMapToActionableProviderIssues() async {
+        let session = credentials(expired: true)
+        let authError = #"{"status":"ERROR","error":"Not signed in. Run agy to authenticate."}"#
+        let authProvider = AntigravityProvider(
+            requestJSON: { _ in try JSON(string: "{}") },
+            loadCredentials: { session },
+            findApp: { .unavailable },
+            findCLI: { "/usr/local/bin/agy" },
+            runCLI: { _ in ProcessRunner.Output(status: 1, stdout: Data(authError.utf8)) }
+        )
+        await #expect(throws: ProviderIssue.unauthorized) { try await authProvider.fetch() }
+
+        let timeoutProvider = AntigravityProvider(
+            requestJSON: { _ in try JSON(string: "{}") },
+            loadCredentials: { session },
+            findApp: { .unavailable },
+            findCLI: { "/usr/local/bin/agy" },
+            runCLI: { _ in nil }
+        )
+        await #expect(throws: ProviderIssue.timeout) { try await timeoutProvider.fetch() }
+    }
+
+    @Test func modernLanguageServerWithoutCsrfFlagIsDetectedAsRunningApp() {
+        let processes = """
+        98259 Antigravity      /Applications/Antigravity.app/Contents/MacOS/Antigravity
+        98641 language_server  /Applications/Antigravity.app/Contents/Resources/bin/language_server --standalone --override_ide_name antigravity --subclient_type hub --override_ide_version 2.34.0 --app_data_dir antigravity --read_host_bridge_token_from_stdin
+        """
+        #expect(AntigravityProvider.RunningApp.isAppRunning(inProcessList: processes))
+        #expect(AntigravityProvider.RunningApp.servers(inProcessList: processes).isEmpty)
+    }
 }

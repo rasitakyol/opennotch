@@ -40,7 +40,7 @@ If you use several AI coding tools, their limits live in different places: a 5-h
 | **ChatGPT** | Codex limits of your plan (5-hour and/or Weekly) | Codex CLI — `~/.codex/auth.json` |
 | **Cursor** | One Weekly pool on The X Subscription. Older plans show Grok & Composer, plus Grok Bot when that allowance is still separate | Cursor app (`state.vscdb`) or the Grok Bot app |
 | **Devin** | Daily and Weekly on Pro; Weekly only when the plan hides the daily quota (Max) | Devin CLI — `~/.local/share/devin/credentials.toml`, or Devin Desktop |
-| **Antigravity** | Gemini 5-hour and Weekly | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running Antigravity app |
+| **Antigravity** | Gemini 5-hour and Weekly | Antigravity app or `agy` CLI — `~/.gemini/jetski-standalone-oauth-token`; once that expires, the running app or `agy -p /usage` |
 | **Gemini** | 5-hour and Weekly usage pools, plus remaining AI credits when active | Gemini macOS app — `~/Library/Application Support/com.google.GeminiMacOS` (`Gemini Safe Storage` Keychain key) |
 | **Amp** | AI model (agent) usage and Orb hours | Amp CLI — `~/.local/share/amp/secrets.json` |
 
@@ -107,14 +107,14 @@ For every tool, OpenNotch reads the token that tool already keeps on your Mac an
 | ChatGPT | `GET https://chatgpt.com/backend-api/wham/usage` |
 | Cursor | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`, `…/GetPlanInfo` (weekly or monthly included usage) and `…/GetSandUsageStatus` (Grok Bot) |
 | Devin | `POST https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus` |
-| Antigravity | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` and `…:loadCodeAssist` (plan); after the session expires, the same calls on the running app's loopback server (`…LanguageServerService/RetrieveUserQuotaSummary`, `…/GetLoadCodeAssist`) |
+| Antigravity | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary` and `…:loadCodeAssist` (plan); after the session expires, the running app's loopback server (`…LanguageServerService/RetrieveUserQuotaSummary`, `…/GetLoadCodeAssist`) or `agy -p /usage --output-format json` |
 | Gemini | `POST https://robinfrontend-pa.googleapis.com/$rpc/assistant.mobile.robin.RobinService/GetUsageInfo` |
 | Amp | `POST https://ampcode.com/api/internal?userDisplayBalanceInfo` (or `amp usage` when the CLI's 5-minute OAuth token needs renewal) |
 
 **Privacy notes**
 
 - Tokens are never refreshed by OpenNotch. These tools rotate their refresh tokens, so refreshing from a second app could sign you out of the tool itself. If a session expires, OpenNotch keeps the last numbers and asks you to open that tool once.
-- Antigravity's Google access token lasts about an hour, and Antigravity and `agy` renew it only in memory, so the file is usually expired. OpenNotch then asks the running Antigravity app instead: it reads the per-launch CSRF token from the app's language server command line (`ps`), finds that server's loopback port (`lsof`) and requests the same summary from `127.0.0.1`. When the app isn't open, the row keeps the last numbers. Google's backend only answers Antigravity clients, so the direct requests identify as the installed Antigravity app.
+- Antigravity's Google access token lasts about an hour, and Antigravity and `agy` renew it only in memory, so the file is usually expired. OpenNotch then asks the running app's local server when available, or runs `agy -p /usage --output-format json` so the Antigravity CLI handles its own session renewal. Google's backend only answers Antigravity clients, so direct requests identify as the installed Antigravity app.
 - The Claude Code Keychain item is read through `/usr/bin/security`, the same tool Claude Code uses to write it, so no extra permission prompt appears.
 - Only usage readings, plan names, session-source labels and refresh status are cached, in `~/Library/Application Support/OpenNotch/usage-cache.json`.
 - These endpoints are undocumented and may change. If a service stops working, please open an issue.
