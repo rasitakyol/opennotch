@@ -4,7 +4,8 @@ import Foundation
 ///
 /// The Antigravity app and the `agy` CLI share a Google session file, but its access token lives about an
 /// hour and both renew it only in memory. Once the file has expired, OpenNotch asks the running app's local
-/// server for the same summary instead. Neither path refreshes a token.
+/// server (when its CSRF token is exposed) or falls back to `agy -p /usage --output-format json`, letting
+/// the CLI handle its own session renewal cleanly. OpenNotch itself never refreshes a token.
 public struct AntigravityProvider: UsageProvider {
     public let id = ProviderID.antigravity
     public var keepsCachedReadingWhenUndetected: Bool { true }
@@ -12,6 +13,8 @@ public struct AntigravityProvider: UsageProvider {
     private let loadCredentials: @Sendable () -> Credentials?
     private let sessionFileExists: @Sendable () -> Bool
     private let findApp: @Sendable () async -> AppAvailability
+    private let findCLI: @Sendable () -> String?
+    private let runCLI: @Sendable (String) async -> ProcessRunner.Output?
 
     static let api = "https://cloudcode-pa.googleapis.com/v1internal"
     static let appService = "exa.language_server_pb.LanguageServerService"
@@ -20,7 +23,16 @@ public struct AntigravityProvider: UsageProvider {
             requestJSON: { try await http.json($0) },
             loadCredentials: { LocalFiles.data(Self.tokenFile).flatMap(Self.parseCredentials) },
             sessionFileExists: { LocalFiles.exists(Self.tokenFile) },
-            findApp: { await RunningApp.find() }
+            findApp: { await RunningApp.find() },
+            findCLI: { Self.locateCLI() },
+            runCLI: { cli in
+                await ProcessRunner.run(
+                    cli,
+                    ["-p", "/usage", "--output-format", "json"],
+                    environment: Self.cliEnvironment(),
+                    timeout: 20
+                )
+            }
         )
     }
 
@@ -28,12 +40,16 @@ public struct AntigravityProvider: UsageProvider {
         requestJSON: @escaping @Sendable (URLRequest) async throws -> JSON,
         loadCredentials: @escaping @Sendable () -> Credentials?,
         sessionFileExists: @escaping @Sendable () -> Bool = { false },
-        findApp: @escaping @Sendable () async -> AppAvailability
+        findApp: @escaping @Sendable () async -> AppAvailability,
+        findCLI: @escaping @Sendable () -> String? = { nil },
+        runCLI: @escaping @Sendable (String) async -> ProcessRunner.Output? = { _ in nil }
     ) {
         self.requestJSON = requestJSON
         self.loadCredentials = loadCredentials
         self.sessionFileExists = sessionFileExists
         self.findApp = findApp
+        self.findCLI = findCLI
+        self.runCLI = runCLI
     }
 
     static var tokenFile: String {
@@ -42,8 +58,14 @@ public struct AntigravityProvider: UsageProvider {
 
     public func detect() async -> Bool {
         if sessionFileExists() { return true }
-        if case .running = await findApp() { return true }
-        return false
+        switch await findApp() {
+        case .running:
+            return true
+        case .unavailable:
+            return findCLI() != nil
+        case .notRunning:
+            return false
+        }
     }
 
     public func fetch() async throws -> ProviderSnapshot {
@@ -62,17 +84,24 @@ public struct AntigravityProvider: UsageProvider {
             sessionIssue = .notConfigured
         }
         // Only a missing or stale session switches source; network errors and rate limits stay as they are.
+        let appIssue: ProviderIssue
         switch await findApp() {
         case .notRunning:
-            if sessionIssue == .notConfigured && sessionFileExists() {
-                throw ProviderIssue.notConfigured
-            }
-            throw ProviderIssue.appNotRunning
+            appIssue = (sessionIssue == .notConfigured && sessionFileExists()) ? .notConfigured : .appNotRunning
         case .unavailable:
-            throw ProviderIssue.appUnavailable
+            appIssue = .appUnavailable
         case .running(let app):
-            return try await fetchFromApp(app)
+            do {
+                return try await fetchFromApp(app)
+            } catch ProviderIssue.appUnavailable {
+                appIssue = .appUnavailable
+            }
         }
+
+        if let cli = findCLI() {
+            return try await fetchFromCLI(cli)
+        }
+        throw appIssue
     }
 
     private func fetchFromGoogle(token: String) async throws -> ProviderSnapshot {
@@ -114,6 +143,150 @@ public struct AntigravityProvider: UsageProvider {
             }
         }
         throw lastIssue
+    }
+
+    private func fetchFromCLI(_ cli: String) async throws -> ProviderSnapshot {
+        guard let output = await runCLI(cli) else {
+            throw ProviderIssue.timeout
+        }
+        let stdout = String(data: output.stdout, encoding: .utf8) ?? ""
+        let stderr = String(data: output.stderr, encoding: .utf8) ?? ""
+
+        if let json = Self.parseCLIJSON(output.stdout) {
+            let status = json["status"].string?.uppercased()
+            if status == "ERROR" || (output.status != 0 && status != "SUCCESS") {
+                let message = json["error"].string ?? "\(stdout)\n\(stderr)"
+                throw Self.classifyCLIError(message, exitStatus: output.status)
+            }
+
+            let data = json["command"]["data"]
+            var metrics = Self.parse(quotaSummary: data)
+            if metrics.isEmpty {
+                metrics = Self.parse(quotaSummary: json)
+            }
+            if metrics.isEmpty, let responseText = json["response"].string {
+                metrics = Self.parse(cliResponseText: responseText)
+            }
+            guard !metrics.isEmpty else {
+                throw ProviderIssue.unexpected("Antigravity CLI returned no usage limits.")
+            }
+            return ProviderSnapshot(
+                provider: id,
+                plan: Self.planName(data) ?? Self.planName(json),
+                metrics: metrics,
+                credentialSource: "Antigravity CLI"
+            )
+        }
+
+        if output.status == 0 {
+            let metrics = Self.parse(cliResponseText: stdout)
+            guard !metrics.isEmpty else {
+                throw ProviderIssue.unexpected("Unrecognized Antigravity CLI usage format")
+            }
+            return ProviderSnapshot(
+                provider: id,
+                plan: nil,
+                metrics: metrics,
+                credentialSource: "Antigravity CLI"
+            )
+        }
+
+        throw Self.classifyCLIError("\(stdout)\n\(stderr)", exitStatus: output.status)
+    }
+
+    private static func parseCLIJSON(_ data: Data) -> JSON? {
+        if let json = try? JSON(data: data) { return json }
+        guard let text = String(data: data, encoding: .utf8),
+              let start = text.firstIndex(of: "{"),
+              let end = text.lastIndex(of: "}"),
+              start < end
+        else { return nil }
+        return try? JSON(string: String(text[start...end]))
+    }
+
+    private static func classifyCLIError(_ message: String, exitStatus: Int32) -> ProviderIssue {
+        let lower = message.lowercased()
+        if lower.contains("not logged in")
+            || lower.contains("not signed in")
+            || lower.contains("unauthenticated")
+            || lower.contains("unauthorized")
+            || lower.contains("authentication")
+            || lower.contains("sign in")
+            || lower.contains("login")
+            || lower.contains("token expired")
+            || lower.contains("session expired")
+            || lower.contains("invalid_grant")
+            || lower.contains("401")
+        {
+            return .unauthorized
+        }
+        if lower.contains("rate limit")
+            || lower.contains("resource_exhausted")
+            || lower.contains("too many requests")
+            || lower.contains("429")
+        {
+            return .rateLimited
+        }
+        if lower.contains("no such host")
+            || lower.contains("dial tcp")
+            || lower.contains("connection refused")
+            || lower.contains("connection reset")
+            || lower.contains("network")
+            || lower.contains("offline")
+            || lower.contains("enotfound")
+            || lower.contains("econnrefused")
+            || lower.contains("etimedout")
+            || lower.contains("timed out")
+        {
+            return .offline
+        }
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, trimmed.count <= 160, !trimmed.contains("\n") {
+            return .unexpected(trimmed)
+        }
+        return .unexpected("agy /usage exited with status \(exitStatus)")
+    }
+
+    static func locateCLI() -> String? {
+        var candidates = [
+            LocalFiles.path(".local", "bin", "agy"),
+            LocalFiles.path(".gemini", "bin", "agy"),
+            "/opt/homebrew/bin/agy",
+            "/usr/local/bin/agy",
+        ]
+        if let pathEnv = ProcessInfo.processInfo.environment["PATH"] {
+            for dir in pathEnv.split(separator: ":") where !dir.isEmpty {
+                candidates.append("\(dir)/agy")
+            }
+        }
+        candidates.append("/Applications/Gemini.app/Contents/Helpers/agy")
+        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+            return path
+        }
+        return nil
+    }
+
+    private static func cliEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["NO_COLOR"] = "1"
+        env["TERM"] = "dumb"
+        let standard = [
+            LocalFiles.path(".local", "bin"),
+            LocalFiles.path(".gemini", "bin"),
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ]
+        let existing = (env["PATH"] ?? "").split(separator: ":").map(String.init)
+        var merged = standard
+        for entry in existing where !merged.contains(entry) {
+            merged.append(entry)
+        }
+        env["PATH"] = merged.joined(separator: ":")
+        return env
     }
 
     private func googleRequest(_ method: String, body: String, token: String) -> URLRequest {
@@ -323,29 +496,80 @@ public struct AntigravityProvider: UsageProvider {
     }
 
     /// Gemini's 5-hour and weekly limits, one cell each. Other model pools are left out.
+    /// Accepts both camelCase fields from the Google/app RPCs and snake_case fields from `agy -p /usage --output-format json`.
     public static func parse(quotaSummary json: JSON) -> [UsageMetric] {
         var metrics: [UsageMetric] = []
 
         for group in json["groups"].array {
-            let name = group["displayName"].string ?? ""
+            let name = group["displayName"].string ?? group["name"].string ?? ""
             let buckets = group["buckets"].array.filter { $0["disabled"].bool != true }
-            let bucketIDs = buckets.compactMap { $0["bucketId"].string }
+            let bucketIDs = buckets.compactMap { $0["bucketId"].string ?? $0["id"].string }
             let isGemini = name.lowercased().hasPrefix("gemini") || bucketIDs.contains { $0.hasPrefix("gemini") }
             guard isGemini else { continue }
 
             for bucket in buckets {
-                guard let remaining = bucket["remainingFraction"].double else { continue }
                 let window = window(bucket["window"].string)
                 guard window == .fiveHour || window == .weekly else { continue }
+
+                let resetString = bucket["resetTime"].string ?? bucket["reset_time"].string
+                let hasRemainingAmount = !bucket["remainingAmount"].isNull || !bucket["remaining_amount"].isNull
+                let remaining: Double
+                if let fraction = bucket["remainingFraction"].double ?? bucket["remaining_fraction"].double {
+                    remaining = fraction
+                } else if !hasRemainingAmount, resetString != nil {
+                    // Proto3 / Go `omitempty` drops a 0.0 remaining fraction when a quota window is exhausted.
+                    remaining = 0
+                } else {
+                    continue
+                }
+
+                let bucketID = bucket["bucketId"].string ?? bucket["id"].string ?? "gemini.\(window.rawValue)"
                 metrics.append(UsageMetric(
-                    id: "antigravity.\(bucket["bucketId"].string ?? "gemini.\(window.rawValue)")",
+                    id: "antigravity.\(bucketID)",
                     title: window.title,
                     usedPercent: (1 - min(max(remaining, 0), 1)) * 100,
                     // An untouched window reports "now + its length", which would restart on every refresh.
-                    resetsAt: remaining < 1 ? ISODate.parse(bucket["resetTime"].string) : nil,
+                    resetsAt: remaining < 1 ? ISODate.parse(resetString) : nil,
                     window: window
                 ))
             }
+        }
+        return metrics.sorted { $0.window.sortOrder < $1.window.sortOrder }
+    }
+
+    /// Fallback parser for `agy -p /usage` tab-separated lines:
+    /// `Gemini Models\tWeekly Limit Remaining\t98%\t2026-11-26T06:29:48Z`
+    static func parse(cliResponseText text: String) -> [UsageMetric] {
+        var metrics: [UsageMetric] = []
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let columns = rawLine.split(separator: "\t", omittingEmptySubsequences: false).map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+            guard columns.count >= 3, columns[0].lowercased().hasPrefix("gemini") else { continue }
+
+            let label = columns[1].lowercased()
+            let window: UsageWindow
+            if label.contains("five hour") || label.contains("5-hour") || label.contains("5h") {
+                window = .fiveHour
+            } else if label.contains("weekly") {
+                window = .weekly
+            } else {
+                continue
+            }
+
+            guard columns[2].hasSuffix("%"),
+                  let remainingPercent = Double(columns[2].dropLast())
+            else { continue }
+            let remaining = min(max(remainingPercent / 100, 0), 1)
+            let resetString = columns.count >= 4 ? columns[3] : nil
+            let suffix = window == .fiveHour ? "5h" : "weekly"
+            metrics.append(UsageMetric(
+                id: "antigravity.gemini-\(suffix)",
+                title: window.title,
+                usedPercent: (1 - remaining) * 100,
+                resetsAt: remaining < 1 ? ISODate.parse(resetString) : nil,
+                window: window
+            ))
         }
         return metrics.sorted { $0.window.sortOrder < $1.window.sortOrder }
     }
@@ -362,7 +586,13 @@ public struct AntigravityProvider: UsageProvider {
 
     /// Google One plans arrive as a paid tier next to the base "free-tier".
     static func planName(_ json: JSON) -> String? {
-        let tier = (json["paidTier"]["id"].string ?? json["currentTier"]["id"].string ?? "").lowercased()
+        let tier = (
+            json["paidTier"]["id"].string
+                ?? json["currentTier"]["id"].string
+                ?? json["plan_tier"].string
+                ?? json["planTier"].string
+                ?? ""
+        ).lowercased()
         if tier.contains("ultra") { return "Ultra" }
         if tier.contains("pro") { return "Pro" }
         if tier.contains("standard") { return "Standard" }

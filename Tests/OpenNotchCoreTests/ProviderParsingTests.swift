@@ -227,6 +227,50 @@ struct AntigravityParsingTests {
         #expect(AntigravityProvider.parse(quotaSummary: json).map(\.id) == ["antigravity.gemini-weekly"])
     }
 
+    @Test func parsesSnakeCaseCLIQuotaSummaryAndExhaustedZero() throws {
+        let cliData = """
+        {
+          "groups": [
+            {
+              "name": "Gemini Models",
+              "buckets": [
+                {"id": "gemini-weekly", "window": "weekly", "remaining_fraction": 0.97485566, "reset_time": "2026-11-26T06:29:48Z"},
+                {"id": "gemini-5h", "window": "5h", "reset_time": "2026-11-21T03:29:55Z"}
+              ]
+            },
+            {
+              "name": "Claude and GPT models",
+              "buckets": [
+                {"id": "3p-weekly", "window": "weekly", "remaining_fraction": 0.25, "reset_time": "2026-11-27T22:36:53Z"}
+              ]
+            }
+          ]
+        }
+        """
+        let metrics = AntigravityProvider.parse(quotaSummary: try JSON(string: cliData))
+        #expect(metrics.map(\.id) == ["antigravity.gemini-5h", "antigravity.gemini-weekly"])
+        #expect(metrics.map(\.title) == ["5-hour", "Weekly"])
+        #expect(metrics[0].usedPercent == 100)
+        #expect(metrics[0].resetsAt == ISODate.parse("2026-11-21T03:29:55Z"))
+        #expect(abs(metrics[1].usedPercent - 2.514434) < 0.001)
+        #expect(metrics[1].resetsAt == ISODate.parse("2026-11-26T06:29:48Z"))
+        #expect(metrics.allSatisfy { $0.group == nil && $0.detail == nil })
+    }
+
+    @Test func parsesCLITabSeparatedFallback() {
+        let text = """
+        Gemini Models\tWeekly Limit Remaining\t97%\t2026-11-26T06:29:48Z
+        Gemini Models\tFive Hour Limit Remaining\t98%\t2026-11-21T03:29:55Z
+        Claude and GPT models\tWeekly Limit Remaining\t50%\t2026-11-27T22:36:53Z
+        """
+        let metrics = AntigravityProvider.parse(cliResponseText: text)
+        #expect(metrics.map(\.id) == ["antigravity.gemini-5h", "antigravity.gemini-weekly"])
+        #expect(metrics.map(\.title) == ["5-hour", "Weekly"])
+        #expect(metrics.map { $0.usedPercent.rounded() } == [2, 3])
+        #expect(metrics[0].resetsAt == ISODate.parse("2026-11-21T03:29:55Z"))
+        #expect(metrics[1].resetsAt == ISODate.parse("2026-11-26T06:29:48Z"))
+    }
+
     @Test func credentialsAndPlan() throws {
         let blob = #"{"token": {"access_token": "t", "token_type": "Bearer", "refresh_token": "r", "expiry": "2026-10-01T09:46:09.20065+03:00"}, "auth_method": "consumer"}"#
         let credentials = AntigravityProvider.parseCredentials(Data(blob.utf8))
